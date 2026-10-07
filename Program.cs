@@ -1,21 +1,13 @@
+using FeedbackTool.Data;
+using FeedbackTool.Endpoints;
+
 var builder = WebApplication.CreateBuilder(args);
+
+builder.Services.AddControllers();
+builder.Services.AddScoped<ISurveySubmissionRepository, SurveySubmissionRepository>();
 
 var app = builder.Build();
 
-app.MapPost("/webhook/google-form", async (HttpRequest request) =>
-{
-    using var reader = new StreamReader(request.Body);
-    var body = await reader.ReadToEndAsync();
-
-    Console.WriteLine("===== GOOGLE FORM SUBMISSION =====");
-    Console.WriteLine(body);
-    Console.WriteLine("==================================");
-
-    return Results.Ok(new
-    {
-        success = true,
-        message = "Webhook received"
-    });
-});
+app.MapGoogleFormWebhookEndpoints();
 
 app.Run();

@@ -1,5 +1,4 @@
 using FeedbackTool.Data;
-using FeedbackTool.Endpoints;
 
 var builder = WebApplication.CreateBuilder(args);
 
@@ -8,6 +7,6 @@ builder.Services.AddScoped<ISurveySubmissionRepository, SurveySubmissionReposito
 
 var app = builder.Build();
 
-app.MapGoogleFormWebhookEndpoints();
+app.MapControllers();
 
 app.Run();

@@ -5,6 +5,7 @@ using Microsoft.AspNetCore.Mvc;
 namespace FeedbackTool.Controllers;
 
 [ApiController]
+[Route("webhook/google-form")]
 public sealed class GoogleFormWebhookController(ISurveySubmissionRepository submissions) : ControllerBase
 {
     [HttpPost]

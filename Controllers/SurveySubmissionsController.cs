@@ -4,6 +4,7 @@ using Microsoft.AspNetCore.Mvc;
 namespace FeedbackTool.Controllers;
 
 [ApiController]
+[Route("survey-submissions")]
 public sealed class SurveySubmissionsController(ISurveySubmissionRepository submissions) : ControllerBase
 {
     [HttpGet]

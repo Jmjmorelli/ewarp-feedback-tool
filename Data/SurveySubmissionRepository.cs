@@ -21,7 +21,8 @@ public sealed class SurveySubmissionRepository(IConfiguration configuration) : I
         await using var command = new NpgsqlCommand("""
             insert into survey_submissions (id, form, submitted_at, answers)
             values (@id, @form, @submittedAt, @answers)
-            on conflict (id) do nothing;
+            on conflict (id) do nothing
+            returning id;
             """, connection);
 
         command.Parameters.AddWithValue("id", submission.Id);
@@ -29,7 +30,50 @@ public sealed class SurveySubmissionRepository(IConfiguration configuration) : I
         command.Parameters.AddWithValue("submittedAt", submission.SubmittedAt!.Value);
         command.Parameters.AddWithValue("answers", NpgsqlDbType.Jsonb, submission.Answers.GetRawText());
 
-        await command.ExecuteNonQueryAsync(cancellationToken);
+        var inserted = await command.ExecuteScalarAsync(cancellationToken);
+        if (inserted is null)
+            return;
+
+        await using var configCommand = new NpgsqlCommand("""
+            select project_id, survey_id, vendor_id
+            from form_configurations where form = @form;
+            """, connection);
+        configCommand.Parameters.AddWithValue("form", submission.Form);
+        await using var configReader = await configCommand.ExecuteReaderAsync(cancellationToken);
+        if (!await configReader.ReadAsync(cancellationToken))
+            return;
+
+        var projectId = configReader.GetString(0);
+        var surveyId = configReader.GetString(1);
+        var vendorId = configReader.GetString(2);
+        await configReader.CloseAsync();
+
+        var answers = submission.Answers;
+        var group = ToGroup(Answer(answers, "What is your role at DIU?"));
+        var likes = Answer(answers, "What do you like about GovSignals?");
+        var dislikes = Answer(answers, "What don't you like about GovSignals?");
+        var wants = Answer(answers, "What additions would you suggest for GovSignals?");
+        var responseId = "rsp_" + submission.Id;
+
+        await using var responseCommand = new NpgsqlCommand("""
+            insert into responses (id, raw_submission_id, project_id, survey_id, vendor_id, respondent_group, likes, dislikes, wants, submitted_at)
+            values (@id, @rawId, @projectId, @surveyId, @vendorId, @group, @likes, @dislikes, @wants, @submittedAt);
+
+            insert into activity_events (id, project_id, type, occurred_at, response_id)
+            values (@eventId, @projectId, 'response.submitted', @submittedAt, @id);
+            """, connection);
+        responseCommand.Parameters.AddWithValue("id", responseId);
+        responseCommand.Parameters.AddWithValue("rawId", submission.Id);
+        responseCommand.Parameters.AddWithValue("projectId", projectId);
+        responseCommand.Parameters.AddWithValue("surveyId", surveyId);
+        responseCommand.Parameters.AddWithValue("vendorId", vendorId);
+        responseCommand.Parameters.AddWithValue("group", group);
+        responseCommand.Parameters.AddWithValue("likes", likes);
+        responseCommand.Parameters.AddWithValue("dislikes", dislikes);
+        responseCommand.Parameters.AddWithValue("wants", wants);
+        responseCommand.Parameters.AddWithValue("submittedAt", submission.SubmittedAt!.Value);
+        responseCommand.Parameters.AddWithValue("eventId", "evt_submitted_" + submission.Id);
+        await responseCommand.ExecuteNonQueryAsync(cancellationToken);
     }
 
     public async Task<IReadOnlyList<SurveySubmission>> GetAllAsync(CancellationToken cancellationToken)
@@ -65,4 +109,16 @@ public sealed class SurveySubmissionRepository(IConfiguration configuration) : I
 
         return submissions;
     }
+
+    private static string Answer(JsonElement answers, string question) =>
+        answers.ValueKind == JsonValueKind.Object && answers.TryGetProperty(question, out var value) && value.ValueKind == JsonValueKind.String
+            ? value.GetString() ?? string.Empty
+            : string.Empty;
+
+    private static string ToGroup(string role) => role.Trim().ToLowerInvariant() switch
+    {
+        "pm/project manager" or "program manager" or "project manager" => "pm",
+        "sponsor" or "sponsor's team" => "sponsor",
+        _ => "other"
+    };
 }

@@ -1,0 +1,82 @@
+name: Deploy
+
+on:
+  push:
+    branches:
+      - master
+  workflow_dispatch:
+
+jobs:
+  deploy:
+    runs-on: ubuntu-latest
+
+    steps:
+      - name: Configure SSH
+        env:
+          VPS_HOST: ${{ secrets.VPS_HOST }}
+          VPS_SSH_KEY: ${{ secrets.VPS_SSH_KEY }}
+        run: |
+          install -m 700 -d ~/.ssh
+          printf '%s\n' "$VPS_SSH_KEY" > ~/.ssh/id_ed25519
+          chmod 600 ~/.ssh/id_ed25519
+          ssh-keyscan -H "$VPS_HOST" >> ~/.ssh/known_hosts
+
+      - name: Publish and restart
+        env:
+          VPS_HOST: ${{ secrets.VPS_HOST }}
+          VPS_USER: ${{ secrets.VPS_USER }}
+          VPS_APP_DIR: ${{ secrets.VPS_APP_DIR }}
+          VPS_PUBLISH_DIR: ${{ secrets.VPS_PUBLISH_DIR }}
+          VPS_SERVICE_NAME: ${{ secrets.VPS_SERVICE_NAME }}
+        run: |
+          ssh "$VPS_USER@$VPS_HOST" "VPS_APP_DIR='$VPS_APP_DIR' VPS_PUBLISH_DIR='$VPS_PUBLISH_DIR' VPS_SERVICE_NAME='$VPS_SERVICE_NAME' bash -s" <<'REMOTE_COMMANDS'
+            set -euo pipefail
+
+            show_service_diagnostics() {
+              echo "Feedback Tool service diagnostics:"
+              sudo systemctl --no-pager --full status "$VPS_SERVICE_NAME" || true
+              sudo journalctl --no-pager --unit "$VPS_SERVICE_NAME" --lines 100 || true
+            }
+            trap show_service_diagnostics ERR
+
+            : "${VPS_APP_DIR:?VPS_APP_DIR must be configured}"
+            : "${VPS_PUBLISH_DIR:?VPS_PUBLISH_DIR must be configured}"
+            : "${VPS_SERVICE_NAME:?VPS_SERVICE_NAME must be configured}"
+
+            case "$VPS_PUBLISH_DIR" in
+              "$VPS_APP_DIR"|"$VPS_APP_DIR"/*)
+                echo "VPS_PUBLISH_DIR must be outside VPS_APP_DIR."
+                exit 1
+                ;;
+            esac
+
+            expected_dll="$VPS_PUBLISH_DIR/feedbackTool.dll"
+
+            # Refuse to deploy if the configured publish path does not match systemd.
+            sudo systemctl cat "$VPS_SERVICE_NAME" |
+              grep -F -- "ExecStart=/usr/bin/dotnet $expected_dll" > /dev/null
+
+            cd "$VPS_APP_DIR"
+            git fetch origin master
+            git pull --ff-only origin master
+            echo "Deploying commit: $(git rev-parse HEAD)"
+
+            dotnet publish feedbackTool.csproj \
+              --configuration Release \
+              --output "$VPS_PUBLISH_DIR"
+
+            test -f "$expected_dll"
+
+            sudo systemctl restart "$VPS_SERVICE_NAME"
+
+            # Ensure the process stays up rather than entering an auto-restart loop.
+            for attempt in {1..15}; do
+              sleep 1
+              if ! sudo systemctl is-active --quiet "$VPS_SERVICE_NAME"; then
+                echo "Feedback Tool did not remain active after restart."
+                exit 1
+              fi
+            done
+
+            sudo systemctl --no-pager --full status "$VPS_SERVICE_NAME"
+          REMOTE_COMMANDS

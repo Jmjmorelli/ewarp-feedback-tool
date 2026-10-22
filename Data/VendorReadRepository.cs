@@ -30,7 +30,7 @@ public sealed class VendorReadRepository(IConfiguration configuration) : IVendor
                 (select count(*) from mentions m join filtered_responses r on r.id=m.response_id where r.vendor_id=v.id and m.kind='dislike')::int as dislikes,
                 (select count(*) from mentions m join filtered_responses r on r.id=m.response_id where r.vendor_id=v.id and m.kind='want')::int as wants
               from vendors v where v.project_id=@projectId)
-            select id, name, response_count, requests_met, requests_total, feature_count, exclusive_count, likes, dislikes, wants,
+            select id, name, form, response_count, requests_met, requests_total, feature_count, exclusive_count, likes, dislikes, wants,
                    count(*) over()::int as total
             from vendor_metrics
             order by {{(sort == "name" ? "name asc, id asc" : "requests_met desc, response_count desc, name asc, id asc")}}
@@ -142,6 +142,7 @@ public sealed class VendorReadRepository(IConfiguration configuration) : IVendor
         var raw = new List<(string Id,string Survey,string Group,NamedRef Vendor,DateTimeOffset Submitted,string Likes,string Dislikes,string Wants,bool Analyzed)>(); var total=0;
         await using var reader = await command.ExecuteReaderAsync(cancellationToken);
         while(await reader.ReadAsync(cancellationToken)) { total=reader.GetInt32(10); raw.Add((reader.GetString(0),reader.GetString(1),reader.GetString(2),new NamedRef(reader.GetString(3),reader.GetString(4)),reader.GetFieldValue<DateTimeOffset>(5),reader.GetString(6),reader.GetString(7),reader.GetString(8),!reader.IsDBNull(9))); }
+        await reader.CloseAsync();
         var mentionMap = await ReadMentionsAsync(connection, raw.Select(x=>x.Id).ToArray(), cancellationToken);
         return new ResponseWithMentionsList(raw.Select(x=>new ResponseWithMentions(x.Id,x.Survey,x.Group,x.Vendor,x.Submitted,x.Likes,x.Dislikes,x.Wants,x.Analyzed,mentionMap.GetValueOrDefault(x.Id,[]))).ToList(),total);
     }

@@ -49,10 +49,10 @@ public sealed class SurveySubmissionRepository(IConfiguration configuration) : I
         await configReader.CloseAsync();
 
         var answers = submission.Answers;
-        var group = ToGroup(Answer(answers, "What is your role at DIU?"));
-        var likes = Answer(answers, "What do you like about GovSignals?");
-        var dislikes = Answer(answers, "What don't you like about GovSignals?");
-        var wants = Answer(answers, "What additions would you suggest for GovSignals?");
+        var group = ToGroup(Answer(answers, ""));
+        var likes = Answer(answers, "");
+        var dislikes = Answer(answers, "");
+        var wants = Answer(answers, "");
         var responseId = "rsp_" + submission.Id;
 
         await using var responseCommand = new NpgsqlCommand("""

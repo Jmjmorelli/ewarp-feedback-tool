@@ -3,5 +3,6 @@ eWARP-backend-handoff/
 obj/
 /packages/
 riderModule.iml
+.idea/
 /_ReSharper.Caches/
 appsettings.json

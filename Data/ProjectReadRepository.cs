@@ -1,4 +1,5 @@
 using Npgsql;
+using NpgsqlTypes;
 
 namespace FeedbackTool.Data;
 
@@ -86,8 +87,8 @@ public sealed class ProjectReadRepository(IConfiguration configuration)
     private static void AddFilters(NpgsqlCommand command, string projectId, DateOnly? from, DateOnly? to, string? group)
     {
         command.Parameters.AddWithValue("id", projectId);
-        command.Parameters.AddWithValue("from", (object?)from?.ToDateTime(TimeOnly.MinValue) ?? DBNull.Value);
-        command.Parameters.AddWithValue("to", (object?)to?.ToDateTime(TimeOnly.MinValue) ?? DBNull.Value);
-        command.Parameters.AddWithValue("group", (object?)group ?? DBNull.Value);
+        command.Parameters.Add(new NpgsqlParameter("from", NpgsqlDbType.TimestampTz) { Value = from is null ? DBNull.Value : new DateTimeOffset(from.Value.ToDateTime(TimeOnly.MinValue), TimeSpan.Zero) });
+        command.Parameters.Add(new NpgsqlParameter("to", NpgsqlDbType.TimestampTz) { Value = to is null ? DBNull.Value : new DateTimeOffset(to.Value.ToDateTime(TimeOnly.MinValue), TimeSpan.Zero) });
+        command.Parameters.Add(new NpgsqlParameter("group", NpgsqlDbType.Text) { Value = (object?)group ?? DBNull.Value });
     }
 }

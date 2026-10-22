@@ -1,4 +1,5 @@
 using Npgsql;
+using NpgsqlTypes;
 using System.Text.Json;
 using Microsoft.AspNetCore.Mvc;
 
@@ -128,35 +129,37 @@ public sealed class ProjectExtrasApiController(IConfiguration configuration) : A
         await using var cmd = new NpgsqlCommand(sql, c);
         cmd.Parameters.AddWithValue("projectId", projectId);
         cmd.Parameters.AddWithValue("limit", n);
-        await using var r = await cmd.ExecuteReaderAsync(ct);
-        while (await r.ReadAsync(ct))
+        await using (var r = await cmd.ExecuteReaderAsync(ct))
         {
-            var id = r.GetString(0);
-            var type = r.GetString(1);
-            var at = r.GetFieldValue<DateTimeOffset>(2);
-            if (type == "response.submitted")
-                items.Add(new
-                {
-                    id, type, occurredAt = at,
-                    response = new
-                    {
-                        id = r.GetString(3), group = r.GetString(6),
-                        vendor = new { id = r.GetString(7), name = r.GetString(8) }
-                    }
-                });
-            else if (type == "gap.detected")
-                items.Add(new
-                    { id, type, occurredAt = at, feature = new { id = r.GetString(9), name = r.GetString(10) } });
-            else
+            while (await r.ReadAsync(ct))
             {
-                var ids = r.IsDBNull(5)
-                    ? Array.Empty<string>()
-                    : JsonSerializer.Deserialize<string[]>(r.GetString(5)) ?? [];
-                items.Add(new
+                var id = r.GetString(0);
+                var type = r.GetString(1);
+                var at = r.GetFieldValue<DateTimeOffset>(2);
+                if (type == "response.submitted")
+                    items.Add(new
+                    {
+                        id, type, occurredAt = at,
+                        response = new
+                        {
+                            id = r.GetString(3), group = r.GetString(6),
+                            vendor = new { id = r.GetString(7), name = r.GetString(8) }
+                        }
+                    });
+                else if (type == "gap.detected")
+                    items.Add(new
+                        { id, type, occurredAt = at, feature = new { id = r.GetString(9), name = r.GetString(10) } });
+                else
                 {
-                    id, type, occurredAt = at, responseId = r.IsDBNull(3) ? null : r.GetString(3),
-                    features = ids.Select(x => new { id = x, name = x })
-                });
+                    var ids = r.IsDBNull(5)
+                        ? Array.Empty<string>()
+                        : JsonSerializer.Deserialize<string[]>(r.GetString(5)) ?? [];
+                    items.Add(new
+                    {
+                        id, type, occurredAt = at, responseId = r.IsDBNull(3) ? null : r.GetString(3),
+                        features = ids.Select(x => new { id = x, name = x })
+                    });
+                }
             }
         }
 
@@ -206,9 +209,8 @@ public sealed class ProjectExtrasApiController(IConfiguration configuration) : A
     private static void AddFilters(NpgsqlCommand cmd, string id, DateOnly? from, DateOnly? to, string? group)
     {
         cmd.Parameters.AddWithValue("projectId", id);
-        cmd.Parameters.AddWithValue("from",
-            (object?)from?.ToDateTime(TimeOnly.MinValue, DateTimeKind.Utc) ?? DBNull.Value);
-        cmd.Parameters.AddWithValue("to", (object?)to?.ToDateTime(TimeOnly.MinValue, DateTimeKind.Utc) ?? DBNull.Value);
-        cmd.Parameters.AddWithValue("group", (object?)group ?? DBNull.Value);
+        cmd.Parameters.Add(new NpgsqlParameter("from", NpgsqlDbType.TimestampTz) { Value = from is null ? DBNull.Value : new DateTimeOffset(from.Value.ToDateTime(TimeOnly.MinValue), TimeSpan.Zero) });
+        cmd.Parameters.Add(new NpgsqlParameter("to", NpgsqlDbType.TimestampTz) { Value = to is null ? DBNull.Value : new DateTimeOffset(to.Value.ToDateTime(TimeOnly.MinValue), TimeSpan.Zero) });
+        cmd.Parameters.Add(new NpgsqlParameter("group", NpgsqlDbType.Text) { Value = (object?)group ?? DBNull.Value });
     }
 }

@@ -3,7 +3,7 @@ using NpgsqlTypes;
 using System.Text.Json;
 using Microsoft.AspNetCore.Mvc;
 
-namespace FeedbackTool.Controllers;
+namespace FeedbackTool.Endpoints;
 
 [Route("api/v1/projects/{projectId}")]
 public sealed class ProjectExtrasApiController(IConfiguration configuration) : ApiControllerBase

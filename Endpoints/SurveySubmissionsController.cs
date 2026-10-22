@@ -1,7 +1,7 @@
 using FeedbackTool.Data;
 using Microsoft.AspNetCore.Mvc;
 
-namespace FeedbackTool.Controllers;
+namespace FeedbackTool.Endpoints;
 
 [ApiController]
 [Route("survey-submissions")]

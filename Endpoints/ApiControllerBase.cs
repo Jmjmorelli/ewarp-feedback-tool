@@ -1,6 +1,6 @@
 using Microsoft.AspNetCore.Mvc;
 
-namespace FeedbackTool.Controllers;
+namespace FeedbackTool.Endpoints;
 
 [ApiController]
 public abstract class ApiControllerBase : ControllerBase

@@ -2,7 +2,7 @@ using FeedbackTool.Data;
 using FeedbackTool.Models;
 using Microsoft.AspNetCore.Mvc;
 
-namespace FeedbackTool.Controllers;
+namespace FeedbackTool.Endpoints;
 
 [ApiController]
 [Route("api/v1/projects/{projectId}/responses")]

@@ -48,11 +48,12 @@ public sealed class SurveySubmissionRepository(IConfiguration configuration) : I
         var vendorId = configReader.GetString(2);
         await configReader.CloseAsync();
 
-        var answers = submission.Answers;
-        var group = ToGroup(Answer(answers, ""));
-        var likes = Answer(answers, "");
-        var dislikes = Answer(answers, "");
-        var wants = Answer(answers, "");
+        // Form answers remain in survey_submissions.answers.  Response summary fields are
+        // intentionally not inferred from form-specific question text.
+        const string group = "other";
+        const string likes = "";
+        const string dislikes = "";
+        const string wants = "";
         var responseId = "rsp_" + submission.Id;
 
         await using var responseCommand = new NpgsqlCommand("""
@@ -109,16 +110,4 @@ public sealed class SurveySubmissionRepository(IConfiguration configuration) : I
 
         return submissions;
     }
-
-    private static string Answer(JsonElement answers, string question) =>
-        answers.ValueKind == JsonValueKind.Object && answers.TryGetProperty(question, out var value) && value.ValueKind == JsonValueKind.String
-            ? value.GetString() ?? string.Empty
-            : string.Empty;
-
-    private static string ToGroup(string role) => role.Trim().ToLowerInvariant() switch
-    {
-        "pm/project manager" or "program manager" or "project manager" => "pm",
-        "sponsor" or "sponsor's team" => "sponsor",
-        _ => "other"
-    };
 }

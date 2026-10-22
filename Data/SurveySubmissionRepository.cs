@@ -48,12 +48,10 @@ public sealed class SurveySubmissionRepository(IConfiguration configuration) : I
         var vendorId = configReader.GetString(2);
         await configReader.CloseAsync();
 
-        // Form answers remain in survey_submissions.answers.  Response summary fields are
-        // intentionally not inferred from form-specific question text.
         const string group = "other";
-        const string likes = "";
-        const string dislikes = "";
-        const string wants = "";
+        var likes = SurveyAnswerExtractor.ValueStartingWith(submission.Answers, SurveyAnswerExtractor.LikesPrefix);
+        var dislikes = SurveyAnswerExtractor.ValueStartingWith(submission.Answers, SurveyAnswerExtractor.DislikesPrefix);
+        var wants = SurveyAnswerExtractor.ValueStartingWith(submission.Answers, SurveyAnswerExtractor.WantsPrefix);
         var responseId = "rsp_" + submission.Id;
 
         await using var responseCommand = new NpgsqlCommand("""

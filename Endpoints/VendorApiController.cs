@@ -1,12 +1,67 @@
 using FeedbackTool.Data;
 using Microsoft.AspNetCore.Mvc;
+using System.Text.Json;
 
 namespace FeedbackTool.Endpoints;
 
 [ApiController]
 [Route("api/v1/projects/{projectId}/vendors")]
-public sealed class VendorApiController(IVendorReadRepository vendors) : ControllerBase
+public sealed class VendorApiController(IVendorReadRepository vendors, IVendorWriteRepository vendorWrites) : ControllerBase
 {
+    [HttpPost]
+    public async Task<IActionResult> Create(string projectId, CancellationToken ct)
+    {
+        using var body = await ReadBodyAsync(ct);
+        if (body is null) return Bad("Enter a vendor name.");
+        if (!TryString(body.RootElement, "name", out var rawName)) return Bad("Enter a vendor name.");
+        var name = Normalize(rawName);
+        if (name.Length is < 1 or > 80) return Bad("Enter a vendor name.");
+        var form = TryString(body.RootElement, "form", out var rawForm) ? Normalize(rawForm) : name;
+        if (form.Length > 200) return Bad("Form must be 200 characters or fewer.");
+        return ToResult(await vendorWrites.CreateAsync(projectId, name, form, ct));
+    }
+
+    [HttpPatch("{vendorId}")]
+    public async Task<IActionResult> Update(string projectId, string vendorId, CancellationToken ct)
+    {
+        using var body = await ReadBodyAsync(ct);
+        if (body is null) return Bad("Send at least one of name, form or featureIds.");
+        var root = body.RootElement;
+        var hasName = root.TryGetProperty("name", out var nameElement);
+        var hasForm = root.TryGetProperty("form", out var formElement);
+        var hasFeatures = root.TryGetProperty("featureIds", out var featuresElement);
+        if (!hasName && !hasForm && !hasFeatures) return Bad("Send at least one of name, form or featureIds.");
+        string? name = null;
+        string? form = null;
+        if (hasName)
+        {
+            if (nameElement.ValueKind != JsonValueKind.String) return Bad("Enter a vendor name.");
+            name = Normalize(nameElement.GetString()!);
+            if (name.Length is < 1 or > 80) return Bad("Enter a vendor name.");
+        }
+        if (hasForm)
+        {
+            if (formElement.ValueKind != JsonValueKind.String) return Bad("Enter a form name.");
+            form = Normalize(formElement.GetString()!);
+            if (form.Length > 200) return Bad("Form must be 200 characters or fewer.");
+        }
+        List<string>? featureIds = null;
+        if (hasFeatures)
+        {
+            if (featuresElement.ValueKind != JsonValueKind.Array) return Bad("featureIds must be an array.");
+            featureIds = [];
+            foreach (var feature in featuresElement.EnumerateArray())
+            {
+                if (feature.ValueKind != JsonValueKind.String) return Bad("featureIds must be an array of IDs.");
+                featureIds.Add(feature.GetString()!);
+            }
+        }
+        return ToResult(await vendorWrites.UpdateAsync(projectId, vendorId, name, form, featureIds, ct));
+    }
+
+    [HttpDelete("{vendorId}")]
+    public async Task<IActionResult> Delete(string projectId, string vendorId, CancellationToken ct) => ToResult(await vendorWrites.DeleteAsync(projectId, vendorId, ct));
+
     [HttpGet]
     public async Task<IActionResult> List(string projectId, [FromQuery] string? sort, [FromQuery] int? limit, [FromQuery(Name="from")] DateOnly? from, [FromQuery(Name="to")] DateOnly? to, [FromQuery(Name="group")] string? group, CancellationToken ct)
     {
@@ -31,4 +86,16 @@ public sealed class VendorApiController(IVendorReadRepository vendors) : Control
     private ObjectResult NotFoundProject(string id)=>NotFound(new {error=new {code="not_found",message=$"Project {id} not found"}});
     private ObjectResult NotFoundVendor(string id)=>NotFound(new {error=new {code="not_found",message=$"Vendor {id} not found"}});
     private ObjectResult Bad(string message)=>BadRequest(new {error=new {code="bad_request",message}});
+    private IActionResult ToResult(VendorWriteResult result) => result.Code is null ? result.Status == 204 ? NoContent() : StatusCode(result.Status, result.Vendor) : StatusCode(result.Status, new { error = new { code = result.Code, message = result.Message } });
+    private async Task<JsonDocument?> ReadBodyAsync(CancellationToken ct)
+    {
+        try { return await JsonDocument.ParseAsync(Request.Body, cancellationToken: ct); }
+        catch (JsonException) { return null; }
+    }
+    private static bool TryString(JsonElement root, string property, out string value)
+    {
+        value = string.Empty;
+        return root.ValueKind == JsonValueKind.Object && root.TryGetProperty(property, out var element) && element.ValueKind == JsonValueKind.String && (value = element.GetString() ?? string.Empty) is not null;
+    }
+    private static string Normalize(string value) => string.Join(' ', value.Trim().Split((char[]?)null, StringSplitOptions.RemoveEmptyEntries));
 }

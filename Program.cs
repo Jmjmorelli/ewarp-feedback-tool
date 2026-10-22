@@ -7,6 +7,7 @@ builder.Services.AddScoped<ISurveySubmissionRepository, SurveySubmissionReposito
 builder.Services.AddScoped<ProjectReadRepository>();
 builder.Services.AddScoped<IFeatureReadRepository, FeatureReadRepository>();
 builder.Services.AddScoped<IVendorReadRepository, VendorReadRepository>();
+builder.Services.AddScoped<IVendorWriteRepository, VendorWriteRepository>();
 builder.Services.AddScoped<IResponseRepository, ResponseRepository>();
 builder.Services.AddSingleton<DatabaseInitializer>();
 builder.Services.AddHostedService<ResponseAnalysisWorker>();

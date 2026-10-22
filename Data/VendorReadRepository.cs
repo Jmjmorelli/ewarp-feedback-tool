@@ -20,7 +20,7 @@ public sealed class VendorReadRepository(IConfiguration configuration) : IVendor
             with filtered_responses as (select r.* from responses r where {{where}}),
             request_features as (select distinct m.feature_id from mentions m join filtered_responses r on r.id=m.response_id where m.kind='want'),
             vendor_metrics as (
-              select v.id, v.name,
+              select v.id, v.name, (select fc.form from form_configurations fc where fc.vendor_id=v.id limit 1) as form,
                 (select count(*) from filtered_responses r where r.vendor_id=v.id)::int as response_count,
                 (select count(*) from vendor_offerings vo join request_features rf on rf.feature_id=vo.feature_id where vo.vendor_id=v.id)::int as requests_met,
                 (select count(*) from request_features)::int as requests_total,
@@ -41,7 +41,7 @@ public sealed class VendorReadRepository(IConfiguration configuration) : IVendor
         if (limit.HasValue) command.Parameters.AddWithValue("limit", limit.Value);
         var items = new List<VendorListItem>(); var total = 0;
         await using var reader = await command.ExecuteReaderAsync(cancellationToken);
-        while (await reader.ReadAsync(cancellationToken)) { total = reader.GetInt32(10); items.Add(ReadVendor(reader)); }
+        while (await reader.ReadAsync(cancellationToken)) { total = reader.GetInt32(11); items.Add(ReadVendor(reader)); }
         return new VendorListResult(items, total);
     }
 
@@ -50,7 +50,7 @@ public sealed class VendorReadRepository(IConfiguration configuration) : IVendor
         await using var connection = await OpenAsync(cancellationToken);
         const string sql = """
             with request_features as (select distinct m.feature_id from mentions m join responses r on r.id=m.response_id where r.project_id=@projectId and m.kind='want')
-            select v.id,v.name,
+            select v.id,v.name,(select fc.form from form_configurations fc where fc.vendor_id=v.id limit 1),
               (select count(*) from responses r where r.project_id=@projectId and r.vendor_id=v.id)::int,
               (select count(*) from vendor_offerings vo join request_features rf on rf.feature_id=vo.feature_id where vo.vendor_id=v.id)::int,
               (select count(*) from request_features)::int,
@@ -71,7 +71,7 @@ public sealed class VendorReadRepository(IConfiguration configuration) : IVendor
         idCommand.Parameters.AddWithValue("vendorId", vendorId);
         await using var idReader = await idCommand.ExecuteReaderAsync(cancellationToken);
         while (await idReader.ReadAsync(cancellationToken)) ids.Add(idReader.GetString(0));
-        return new VendorDetail(item.Id, item.Name, item.ResponseCount, item.RequestsMet, item.RequestsTotal, item.FeatureCount, item.ExclusiveCount, item.Sentiment, ids);
+        return new VendorDetail(item.Id, item.Name, item.Form, item.ResponseCount, item.RequestsMet, item.RequestsTotal, item.FeatureCount, item.ExclusiveCount, item.Sentiment, ids);
     }
 
     public async Task<AiSummary?> GetSummaryAsync(string projectId, string vendorId, CancellationToken cancellationToken)
@@ -155,7 +155,7 @@ public sealed class VendorReadRepository(IConfiguration configuration) : IVendor
         return working.ToDictionary(x=>x.Key,x=>(IReadOnlyList<ResponseMention>)x.Value);
     }
 
-    private static VendorListItem ReadVendor(NpgsqlDataReader r) => new(r.GetString(0),r.GetString(1),r.GetInt32(2),r.GetInt32(3),r.GetInt32(4),r.GetInt32(5),r.GetInt32(6),new SentimentCounts(r.GetInt32(7),r.GetInt32(8),r.GetInt32(9)));
+    private static VendorListItem ReadVendor(NpgsqlDataReader r) => new(r.GetString(0),r.GetString(1),r.IsDBNull(2) ? null : r.GetString(2),r.GetInt32(3),r.GetInt32(4),r.GetInt32(5),r.GetInt32(6),r.GetInt32(7),new SentimentCounts(r.GetInt32(8),r.GetInt32(9),r.GetInt32(10)));
     private async Task<NpgsqlConnection> OpenAsync(CancellationToken ct) { var cs=configuration.GetConnectionString("DefaultConnection"); if(string.IsNullOrWhiteSpace(cs))throw new InvalidOperationException("Database connection is not configured."); var c=new NpgsqlConnection(cs); await c.OpenAsync(ct); return c; }
     private static string ResponseWhere(VendorFilter filter,string alias,bool includeVendor) { var clauses=new List<string>{$"{alias}.project_id=@projectId"}; if(includeVendor)clauses.Add($"{alias}.vendor_id=@vendorId"); if(filter.From.HasValue)clauses.Add($"{alias}.submitted_at>=@from"); if(filter.To.HasValue)clauses.Add($"{alias}.submitted_at<@toExclusive"); if(filter.Group is not null)clauses.Add($"{alias}.respondent_group=@group"); return string.Join(" and ",clauses); }
     private static void AddFilterParameters(NpgsqlCommand c,string projectId,VendorFilter f,string? vendorId=null) { c.Parameters.AddWithValue("projectId",projectId); if(vendorId is not null)c.Parameters.AddWithValue("vendorId",vendorId); if(f.From.HasValue)c.Parameters.AddWithValue("from",new DateTimeOffset(f.From.Value.ToDateTime(TimeOnly.MinValue),TimeSpan.Zero)); if(f.To.HasValue)c.Parameters.AddWithValue("toExclusive",new DateTimeOffset(f.To.Value.AddDays(1).ToDateTime(TimeOnly.MinValue),TimeSpan.Zero)); if(f.Group is not null)c.Parameters.AddWithValue("group",f.Group); }

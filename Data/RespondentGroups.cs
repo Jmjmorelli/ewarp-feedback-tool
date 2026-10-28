@@ -3,7 +3,9 @@
 namespace FeedbackTool.Data;
 
 // The respondent's DIU role, read from the survey's role question, so scores can be split per role
-// (sponsor 2026-10-22: "count once per role"). Older values pm / sponsor / other stay valid.
+// (sponsor 2026-10-22: "count once per role"). Saved in responses.respondent_role. respondent_group keeps
+// the frontend's three values (pm / sponsor / other, Shaq's src/lib/api/types.ts), so the API contract
+// does not change; ?group= filters accept a group or a role.
 public static class RespondentGroups
 {
     public const string Other = "other";
@@ -18,6 +20,8 @@ public static class RespondentGroups
     public static readonly string[] All = ["pm", "pd", "pa", "congo", "acquisition", "data_cell", "comops", "wit", "sponsor", Other];
 
     public static bool IsValid(string? group) => group is null || All.Contains(group);
+
+    public static string Legacy(string role) => role is "pm" or "sponsor" ? role : Other;
 
     public static string FromAnswers(JsonElement answers)
     {

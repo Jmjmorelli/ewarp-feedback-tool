@@ -20,7 +20,7 @@ public sealed class ProjectExtrasApiController(IConfiguration configuration) : A
         var n = weeks ?? 6;
         const string sql = """
                            with bucket as (select generate_series(date_trunc('week', current_date) - ((@weeks-1) * interval '1 week'), date_trunc('week', current_date), interval '1 week')::date week_start),
-                           filtered as (select * from responses where project_id=@projectId and (@from is null or submitted_at>=@from) and (@to is null or submitted_at<@to + interval '1 day') and (@group is null or respondent_group=@group))
+                           filtered as (select * from responses where project_id=@projectId and (@from is null or submitted_at>=@from) and (@to is null or submitted_at<@to + interval '1 day') and (@group is null or (respondent_group=@group or respondent_role=@group)))
                            select b.week_start, count(f.id) filter(where f.respondent_group='pm')::int, count(f.id) filter(where f.respondent_group='sponsor')::int, count(f.id) filter(where f.respondent_group not in ('pm','sponsor'))::int from bucket b left join filtered f on f.submitted_at>=b.week_start and f.submitted_at<b.week_start+interval '1 week' group by b.week_start order by b.week_start;
                            """;
         var items = new List<object>();
@@ -73,7 +73,7 @@ public sealed class ProjectExtrasApiController(IConfiguration configuration) : A
         await c.OpenAsync(ct);
         var responses = await ReadResponses(c, projectId, from, to, group, ct);
         const string fsql =
-            """select f.id,f.name,count(o.vendor_id)::int,(select count(*)::int from vendors where project_id=@projectId),coalesce(array_agg(o.vendor_id) filter(where o.vendor_id is not null),array[]::text[]) from features f left join vendor_offerings o on o.feature_id=f.id where f.project_id=@projectId group by f.id,f.name having count(o.vendor_id)>0 or exists(select 1 from mentions m join responses r on r.id=m.response_id where m.feature_id=f.id and r.project_id=@projectId and (@from is null or r.submitted_at>=@from) and (@to is null or r.submitted_at<@to+interval '1 day') and (@group is null or r.respondent_group=@group));""";
+            """select f.id,f.name,count(o.vendor_id)::int,(select count(*)::int from vendors where project_id=@projectId),coalesce(array_agg(o.vendor_id) filter(where o.vendor_id is not null),array[]::text[]) from features f left join vendor_offerings o on o.feature_id=f.id where f.project_id=@projectId group by f.id,f.name having count(o.vendor_id)>0 or exists(select 1 from mentions m join responses r on r.id=m.response_id where m.feature_id=f.id and r.project_id=@projectId and (@from is null or r.submitted_at>=@from) and (@to is null or r.submitted_at<@to+interval '1 day') and (@group is null or (r.respondent_group=@group or r.respondent_role=@group)));""";
         var features = new List<object>();
         await using (var cmd = new NpgsqlCommand(fsql, c))
         {
@@ -102,7 +102,7 @@ public sealed class ProjectExtrasApiController(IConfiguration configuration) : A
         }
 
         const string lsql =
-            """select m.response_id,m.feature_id,m.kind from mentions m join responses r on r.id=m.response_id where r.project_id=@projectId and (@from is null or r.submitted_at>=@from) and (@to is null or r.submitted_at<@to+interval '1 day') and (@group is null or r.respondent_group=@group);""";
+            """select m.response_id,m.feature_id,m.kind from mentions m join responses r on r.id=m.response_id where r.project_id=@projectId and (@from is null or r.submitted_at>=@from) and (@to is null or r.submitted_at<@to+interval '1 day') and (@group is null or (r.respondent_group=@group or r.respondent_role=@group));""";
         var links = new List<object>();
         await using (var cmd = new NpgsqlCommand(lsql, c))
         {
@@ -171,7 +171,7 @@ public sealed class ProjectExtrasApiController(IConfiguration configuration) : A
         string? group, CancellationToken ct)
     {
         const string sql =
-            """select r.id,r.survey_id,r.respondent_group,v.id,v.name,r.submitted_at,r.likes,r.dislikes,r.wants,r.analyzed_at is not null from responses r join vendors v on v.id=r.vendor_id where r.project_id=@projectId and (@from is null or r.submitted_at>=@from) and (@to is null or r.submitted_at<@to+interval '1 day') and (@group is null or r.respondent_group=@group) order by r.submitted_at desc;""";
+            """select r.id,r.survey_id,r.respondent_group,v.id,v.name,r.submitted_at,r.likes,r.dislikes,r.wants,r.analyzed_at is not null from responses r join vendors v on v.id=r.vendor_id where r.project_id=@projectId and (@from is null or r.submitted_at>=@from) and (@to is null or r.submitted_at<@to+interval '1 day') and (@group is null or (r.respondent_group=@group or r.respondent_role=@group)) order by r.submitted_at desc;""";
         var list = new List<object>();
         await using var cmd = new NpgsqlCommand(sql, c);
         AddFilters(cmd, projectId, from, to, group);

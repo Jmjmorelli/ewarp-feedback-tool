@@ -1,4 +1,4 @@
-using Npgsql;
+﻿using Npgsql;
 using NpgsqlTypes;
 
 namespace FeedbackTool.Data;
@@ -13,7 +13,7 @@ public sealed class FeatureReadRepository(IConfiguration configuration) : IFeatu
                              select m.feature_id, m.kind from mentions m join responses r on r.id=m.response_id
                              where r.project_id=@projectId and (@from is null or r.submitted_at >= @from)
                                and (@toExclusive is null or r.submitted_at < @toExclusive)
-                               and (@group is null or r.respondent_group=@group)
+                               and (@group is null or (r.respondent_group=@group or r.respondent_role=@group))
                            ), offerings as (
                              select vo.feature_id, array_agg(vo.vendor_id order by vo.vendor_id) vendor_ids, count(*) offering_count
                              from vendor_offerings vo join vendors v on v.id=vo.vendor_id where v.project_id=@projectId group by vo.feature_id
@@ -82,7 +82,7 @@ public sealed class FeatureReadRepository(IConfiguration configuration) : IFeatu
         if (!await ExistsAsync(projectId, featureId, ct)) return null;
         const string sql = """
                            with matches as (select distinct r.id from responses r join mentions m on m.response_id=r.id where r.project_id=@projectId and m.feature_id=@featureId
-                             and (@kind is null or m.kind=@kind) and (@from is null or r.submitted_at>=@from) and (@toExclusive is null or r.submitted_at<@toExclusive) and (@group is null or r.respondent_group=@group))
+                             and (@kind is null or m.kind=@kind) and (@from is null or r.submitted_at>=@from) and (@toExclusive is null or r.submitted_at<@toExclusive) and (@group is null or (r.respondent_group=@group or r.respondent_role=@group)))
                            select r.id,r.survey_id,r.respondent_group,v.id,v.name,r.submitted_at,r.likes,r.dislikes,r.wants,r.analyzed_at,
                              array_agg(m.kind order by m.kind) filter(where m.id is not null) kinds, count(*) over()::int total
                            from matches x join responses r on r.id=x.id join vendors v on v.id=r.vendor_id join mentions m on m.response_id=r.id and m.feature_id=@featureId
@@ -92,7 +92,7 @@ public sealed class FeatureReadRepository(IConfiguration configuration) : IFeatu
         await using var cmd = new NpgsqlCommand(sql, c);
         AddFilters(cmd, projectId, query.Filters);
         cmd.Parameters.AddWithValue("featureId", featureId);
-        cmd.Parameters.AddWithValue("kind", (object?)query.Kind ?? DBNull.Value);
+        cmd.Parameters.Add(new("kind", NpgsqlDbType.Text) { Value = (object?)query.Kind ?? DBNull.Value });
         cmd.Parameters.AddWithValue("limit", query.Limit ?? 500);
         var items = new List<FeatureResponseDto>();
         var total = 0;
@@ -153,7 +153,7 @@ public sealed class FeatureReadRepository(IConfiguration configuration) : IFeatu
         CancellationToken ct)
     {
         const string sql =
-            """with fm as (select m.feature_id,m.kind from mentions m join responses r on r.id=m.response_id where r.project_id=@projectId and (@from is null or r.submitted_at>=@from) and (@toExclusive is null or r.submitted_at<@toExclusive) and (@group is null or r.respondent_group=@group)),o as(select vo.feature_id,array_agg(vo.vendor_id order by vo.vendor_id) ids,count(*) offers from vendor_offerings vo join vendors v on v.id=vo.vendor_id where v.project_id=@projectId group by vo.feature_id) select f.id,f.name,f.created_at,coalesce(o.ids,array[]::text[]),coalesce(o.offers,0)::int,count(fm.feature_id)::int,count(*) filter(where fm.kind='like')::int,count(*) filter(where fm.kind='dislike')::int,count(*) filter(where fm.kind='want')::int,(select count(*) from vendors where project_id=@projectId)::int from features f left join fm on fm.feature_id=f.id left join o on o.feature_id=f.id where f.project_id=@projectId and f.id=@featureId group by f.id,f.name,f.created_at,o.ids,o.offers""";
+            """with fm as (select m.feature_id,m.kind from mentions m join responses r on r.id=m.response_id where r.project_id=@projectId and (@from is null or r.submitted_at>=@from) and (@toExclusive is null or r.submitted_at<@toExclusive) and (@group is null or (r.respondent_group=@group or r.respondent_role=@group))),o as(select vo.feature_id,array_agg(vo.vendor_id order by vo.vendor_id) ids,count(*) offers from vendor_offerings vo join vendors v on v.id=vo.vendor_id where v.project_id=@projectId group by vo.feature_id) select f.id,f.name,f.created_at,coalesce(o.ids,array[]::text[]),coalesce(o.offers,0)::int,count(fm.feature_id)::int,count(*) filter(where fm.kind='like')::int,count(*) filter(where fm.kind='dislike')::int,count(*) filter(where fm.kind='want')::int,(select count(*) from vendors where project_id=@projectId)::int from features f left join fm on fm.feature_id=f.id left join o on o.feature_id=f.id where f.project_id=@projectId and f.id=@featureId group by f.id,f.name,f.created_at,o.ids,o.offers""";
         await using var c = await OpenAsync(ct);
         await using var cmd = new NpgsqlCommand(sql, c);
         AddFilters(cmd, projectId, filters ?? new(null, null, null));

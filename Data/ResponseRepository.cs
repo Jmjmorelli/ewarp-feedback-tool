@@ -108,7 +108,7 @@ public sealed class ResponseRepository(IConfiguration configuration) : IResponse
         if (!string.IsNullOrWhiteSpace(q.Q)) clauses.Add("(r.likes ilike @search or r.dislikes ilike @search or r.wants ilike @search)");
         if (q.From is not null) clauses.Add("r.submitted_at >= @from");
         if (q.To is not null) clauses.Add("r.submitted_at < @toExclusive");
-        if (includeGroup && !string.IsNullOrWhiteSpace(q.Group)) clauses.Add("r.respondent_group = @group");
+        if (includeGroup && !string.IsNullOrWhiteSpace(q.Group)) clauses.Add("(r.respondent_group = @group or r.respondent_role = @group)");
         return new WhereClause(string.Join(" and ", clauses));
     }
     private static NpgsqlCommand CreateCommand(NpgsqlConnection c, string sql, string projectId, ResponseListQuery q)

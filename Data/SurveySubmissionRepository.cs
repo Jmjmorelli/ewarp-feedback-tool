@@ -48,15 +48,16 @@ public sealed class SurveySubmissionRepository(IConfiguration configuration) : I
         var vendorId = configReader.GetString(2);
         await configReader.CloseAsync();
 
-        var group = RespondentGroups.FromAnswers(submission.Answers);
+        var role = RespondentGroups.FromAnswers(submission.Answers);
+        var group = RespondentGroups.Legacy(role);
         var likes = SurveyAnswerExtractor.ValueStartingWith(submission.Answers, SurveyAnswerExtractor.LikesPrefix);
         var dislikes = SurveyAnswerExtractor.ValueStartingWith(submission.Answers, SurveyAnswerExtractor.DislikesPrefix);
         var wants = SurveyAnswerExtractor.ValueStartingWith(submission.Answers, SurveyAnswerExtractor.WantsPrefix);
         var responseId = "rsp_" + submission.Id;
 
         await using var responseCommand = new NpgsqlCommand("""
-            insert into responses (id, raw_submission_id, project_id, survey_id, vendor_id, respondent_group, likes, dislikes, wants, submitted_at)
-            values (@id, @rawId, @projectId, @surveyId, @vendorId, @group, @likes, @dislikes, @wants, @submittedAt);
+            insert into responses (id, raw_submission_id, project_id, survey_id, vendor_id, respondent_group, respondent_role, likes, dislikes, wants, submitted_at)
+            values (@id, @rawId, @projectId, @surveyId, @vendorId, @group, @role, @likes, @dislikes, @wants, @submittedAt);
 
             insert into activity_events (id, project_id, type, occurred_at, response_id)
             values (@eventId, @projectId, 'response.submitted', @submittedAt, @id);
@@ -67,6 +68,7 @@ public sealed class SurveySubmissionRepository(IConfiguration configuration) : I
         responseCommand.Parameters.AddWithValue("surveyId", surveyId);
         responseCommand.Parameters.AddWithValue("vendorId", vendorId);
         responseCommand.Parameters.AddWithValue("group", group);
+        responseCommand.Parameters.AddWithValue("role", role);
         responseCommand.Parameters.AddWithValue("likes", likes);
         responseCommand.Parameters.AddWithValue("dislikes", dislikes);
         responseCommand.Parameters.AddWithValue("wants", wants);

@@ -114,7 +114,7 @@ jobs:
             fi
             "$venv/bin/pip" install -q --upgrade pip
             "$venv/bin/pip" install -q -r "$code/requirements.txt"
-            "$venv/bin/python" -c "import en_core_web_lg" 2>/dev/null || "$venv/bin/python" -m spacy download -q en_core_web_lg
+            "$venv/bin/python" -c "import en_core_web_lg" 2>/dev/null || "$venv/bin/python" -m spacy download en_core_web_lg
             sudo tee /etc/systemd/system/ewarp-classifier.service > /dev/null <<UNIT
           [Unit]
           Description=EWARP survey feature finder (classifier/README.md)

@@ -43,7 +43,7 @@ public sealed class ResponseRepository(IConfiguration configuration) : IResponse
         var groups = await CountsAsync(connection, $"select r.respondent_group, count(*) from responses r {groupWhere.Sql} group by r.respondent_group", projectId, query, cancellationToken);
         var statuses = await CountsAsync(connection, $"select case when r.analyzed_at is null then 'pending' else 'analyzed' end, count(*) from responses r {statusWhere.Sql} group by 1", projectId, query, cancellationToken);
         return new ResponseListDto(items, total, new ResponseFacetsDto(
-            new GroupCountsDto(Get(groups, "pm"), Get(groups, "sponsor"), Get(groups, "other")),
+            new GroupCountsDto(Get(groups, "pm"), Get(groups, "sponsor"), groups.Where(g => g.Key is not ("pm" or "sponsor")).Sum(g => g.Value)),
             new StatusCountsDto(Get(statuses, "analyzed"), Get(statuses, "pending"))));
     }
 

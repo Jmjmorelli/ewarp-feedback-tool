@@ -29,7 +29,7 @@ public sealed class ResponsesController(IResponseRepository responses) : Control
         if (q.Offset < 0) return "offset must be zero or greater.";
         if (q.Sort is not ("newest" or "oldest")) return "sort must be newest or oldest.";
         if (q.Status is not null && q.Status is not ("analyzed" or "pending")) return "status must be analyzed or pending.";
-        if (q.Group is not null && q.Group is not ("pm" or "sponsor" or "other")) return "group must be pm, sponsor, or other.";
+        if (!Data.RespondentGroups.IsValid(q.Group)) return "group must be one of: " + string.Join(", ", Data.RespondentGroups.All) + ".";
         if (q.Q?.Length > 100) return "q must be at most 100 characters.";
         if (q.From is not null && q.To is not null && q.From > q.To) return "from must not be after to.";
         return null;

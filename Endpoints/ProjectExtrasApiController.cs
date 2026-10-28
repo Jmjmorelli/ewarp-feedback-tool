@@ -21,7 +21,7 @@ public sealed class ProjectExtrasApiController(IConfiguration configuration) : A
         const string sql = """
                            with bucket as (select generate_series(date_trunc('week', current_date) - ((@weeks-1) * interval '1 week'), date_trunc('week', current_date), interval '1 week')::date week_start),
                            filtered as (select * from responses where project_id=@projectId and (@from is null or submitted_at>=@from) and (@to is null or submitted_at<@to + interval '1 day') and (@group is null or respondent_group=@group))
-                           select b.week_start, count(f.id) filter(where f.respondent_group='pm')::int, count(f.id) filter(where f.respondent_group='sponsor')::int, count(f.id) filter(where f.respondent_group='other')::int from bucket b left join filtered f on f.submitted_at>=b.week_start and f.submitted_at<b.week_start+interval '1 week' group by b.week_start order by b.week_start;
+                           select b.week_start, count(f.id) filter(where f.respondent_group='pm')::int, count(f.id) filter(where f.respondent_group='sponsor')::int, count(f.id) filter(where f.respondent_group not in ('pm','sponsor'))::int from bucket b left join filtered f on f.submitted_at>=b.week_start and f.submitted_at<b.week_start+interval '1 week' group by b.week_start order by b.week_start;
                            """;
         var items = new List<object>();
         await using var c = new NpgsqlConnection(Cs);
@@ -44,7 +44,7 @@ public sealed class ProjectExtrasApiController(IConfiguration configuration) : A
     {
         if (!await Exists(projectId, ct)) return NotFoundError($"Project {projectId} not found");
         const string sql =
-            """select s.id,s.name,s.source,s.status,s.created_at,count(r.id)::int,count(r.id) filter(where r.analyzed_at is not null)::int,count(distinct r.vendor_id)::int,max(r.submitted_at),count(r.id) filter(where r.respondent_group='pm')::int,count(r.id) filter(where r.respondent_group='sponsor')::int,count(r.id) filter(where r.respondent_group='other')::int from surveys s left join responses r on r.survey_id=s.id where s.project_id=@projectId group by s.id,s.name,s.source,s.status,s.created_at order by s.created_at desc;""";
+            """select s.id,s.name,s.source,s.status,s.created_at,count(r.id)::int,count(r.id) filter(where r.analyzed_at is not null)::int,count(distinct r.vendor_id)::int,max(r.submitted_at),count(r.id) filter(where r.respondent_group='pm')::int,count(r.id) filter(where r.respondent_group='sponsor')::int,count(r.id) filter(where r.respondent_group not in ('pm','sponsor'))::int from surveys s left join responses r on r.survey_id=s.id where s.project_id=@projectId group by s.id,s.name,s.source,s.status,s.created_at order by s.created_at desc;""";
         var items = new List<object>();
         await using var c = new NpgsqlConnection(Cs);
         await c.OpenAsync(ct);
@@ -204,7 +204,7 @@ public sealed class ProjectExtrasApiController(IConfiguration configuration) : A
     }
 
     private static bool FiltersValid(DateOnly? from, DateOnly? to, string? group) =>
-        (from is null || to is null || from <= to) && (group is null or "pm" or "sponsor" or "other");
+        (from is null || to is null || from <= to) && Data.RespondentGroups.IsValid(group);
 
     private static void AddFilters(NpgsqlCommand cmd, string id, DateOnly? from, DateOnly? to, string? group)
     {

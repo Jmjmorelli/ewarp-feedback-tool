@@ -1,0 +1,13 @@
+{
+  "_note": "Copy to sensitive_terms.json (never committed) and put the real list there: vendor names, DIU staff, portfolio companies, program codenames. kind = PERSON, ORG, or PROGRAM.",
+  "terms": [
+    {
+      "value": "Vendor One Inc",
+      "kind": "ORG"
+    },
+    {
+      "value": "Morgan",
+      "kind": "PERSON"
+    }
+  ]
+}

@@ -25,5 +25,5 @@ public sealed class FeatureApiController(IFeatureReadRepository features) : Cont
     private IActionResult Bad()=>BadRequest(new { error=new { code="bad_request",message="One or more query parameters are invalid" }});
     private static bool ValidLimit(int? x)=>x is null or >=1 and <=500;
     private static bool OneOf(string? value,params string[] allowed)=>value is null||allowed.Contains(value,StringComparer.Ordinal);
-    private static bool ValidFilters(DateOnly? from,DateOnly? to,string? group)=> (from is null||to is null||from<=to)&&OneOf(group,"pm","sponsor","other");
+    private static bool ValidFilters(DateOnly? from,DateOnly? to,string? group)=> (from is null||to is null||from<=to)&&RespondentGroups.IsValid(group);
 }

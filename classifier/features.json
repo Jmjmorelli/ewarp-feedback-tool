@@ -1,0 +1,138 @@
+{
+  "_note": "vendors = the two Google Forms. topics = the 12 rating questions on both forms; the AI reuses these names when an answer matches one, and makes up a new short name when it doesn't. offeredBy = vendors the 52-asks sheet (09-Capstone-Submission/02-Data/DIU All Asks - Unified (ANONYMISED).xlsx) marks 'Yes' or 'Sort of' for the asks listed. Vendors stay 'Vendor 1' / 'Vendor 2' in anything that leaves the machine (EWARP rule).",
+  "vendors": [
+    {
+      "id": "v1",
+      "name": "Vendor 1",
+      "form": "vendor1"
+    },
+    {
+      "id": "v2",
+      "name": "Vendor 2",
+      "form": "vendor2"
+    }
+  ],
+  "topics": [
+    {
+      "name": "Salesforce & Google Drive integration",
+      "offeredBy": [
+        "v1"
+      ],
+      "asks": [
+        "ASK-023",
+        "ASK-042"
+      ]
+    },
+    {
+      "name": "Workflow & pipeline view",
+      "offeredBy": [
+        "v1",
+        "v2"
+      ],
+      "asks": [
+        "ASK-034"
+      ]
+    },
+    {
+      "name": "Task automation",
+      "offeredBy": [
+        "v1"
+      ],
+      "asks": [
+        "ASK-038",
+        "ASK-043"
+      ]
+    },
+    {
+      "name": "Project history & timeline",
+      "offeredBy": [
+        "v1",
+        "v2"
+      ],
+      "asks": [
+        "ASK-020",
+        "ASK-021"
+      ]
+    },
+    {
+      "name": "Market research",
+      "offeredBy": [
+        "v1"
+      ],
+      "asks": [
+        "ASK-013",
+        "ASK-026",
+        "ASK-035"
+      ]
+    },
+    {
+      "name": "Solicitation & proposal forms",
+      "offeredBy": [],
+      "asks": []
+    },
+    {
+      "name": "Congressional reporting docs",
+      "offeredBy": [
+        "v1",
+        "v2"
+      ],
+      "asks": [
+        "ASK-003",
+        "ASK-009",
+        "ASK-015"
+      ]
+    },
+    {
+      "name": "Role-based permissions",
+      "offeredBy": [
+        "v1",
+        "v2"
+      ],
+      "asks": [
+        "ASK-034"
+      ]
+    },
+    {
+      "name": "Data sync with DIU",
+      "offeredBy": [
+        "v1"
+      ],
+      "asks": [
+        "ASK-010",
+        "ASK-017"
+      ]
+    },
+    {
+      "name": "Document import",
+      "offeredBy": [
+        "v1",
+        "v2"
+      ],
+      "asks": [
+        "ASK-024"
+      ]
+    },
+    {
+      "name": "Finances & ledgers",
+      "offeredBy": [
+        "v1"
+      ],
+      "asks": [
+        "ASK-017",
+        "ASK-022",
+        "ASK-025",
+        "ASK-030"
+      ]
+    },
+    {
+      "name": "Vendor collaboration",
+      "offeredBy": [
+        "v1"
+      ],
+      "asks": [
+        "ASK-037",
+        "ASK-040"
+      ]
+    }
+  ]
+}

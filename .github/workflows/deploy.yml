@@ -80,3 +80,65 @@ jobs:
 
             sudo systemctl --no-pager --full status "$VPS_SERVICE_NAME"
           REMOTE_COMMANDS
+
+      # Survey feature finder (classifier/README.md). Skipped when the CLASSIFIER_RIGHTCODES_KEY secret is not set.
+      - name: Classifier service
+        env:
+          VPS_HOST: ${{ secrets.VPS_HOST }}
+          VPS_USER: ${{ secrets.VPS_USER }}
+          VPS_APP_DIR: ${{ secrets.VPS_APP_DIR }}
+          CLASSIFIER_RIGHTCODES_KEY: ${{ secrets.CLASSIFIER_RIGHTCODES_KEY }}
+          CLASSIFIER_DATABASE_URL: ${{ secrets.CLASSIFIER_DATABASE_URL }}
+          CLASSIFIER_SENSITIVE_TERMS: ${{ secrets.CLASSIFIER_SENSITIVE_TERMS }}
+        run: |
+          if [ -z "$CLASSIFIER_RIGHTCODES_KEY" ] || [ -z "$CLASSIFIER_DATABASE_URL" ]; then
+            echo "Classifier secrets not set, skipping the classifier."
+            exit 0
+          fi
+          # secrets go straight into root-only files on the server, never into the repo or the log
+          printf 'RIGHTCODES_API_KEY=%s\nDATABASE_URL=%s\n' "$CLASSIFIER_RIGHTCODES_KEY" "$CLASSIFIER_DATABASE_URL" |
+            ssh "$VPS_USER@$VPS_HOST" 'sudo install -D -m 600 -o root -g root /dev/stdin /etc/ewarp-classifier/env'
+          terms="$CLASSIFIER_SENSITIVE_TERMS"
+          [ -n "$terms" ] || terms='{"terms": []}'
+          printf '%s' "$terms" |
+            ssh "$VPS_USER@$VPS_HOST" "sudo install -D -m 600 -o $VPS_USER /dev/stdin /etc/ewarp-classifier/sensitive_terms.json"
+          ssh "$VPS_USER@$VPS_HOST" "VPS_APP_DIR='$VPS_APP_DIR' bash -s" <<'REMOTE_COMMANDS'
+            set -euo pipefail
+            trap 'sudo journalctl --no-pager --unit ewarp-classifier --lines 60 || true' ERR
+            code="$VPS_APP_DIR/classifier"
+            venv=/opt/ewarp-classifier-venv
+            state=/var/lib/ewarp-classifier
+            sudo install -d -o "$USER" "$venv" "$state"
+            if [ ! -x "$venv/bin/python" ]; then
+              python3 -m venv "$venv" || { sudo apt-get update -qq && sudo apt-get install -y -qq python3-venv && python3 -m venv "$venv"; }
+            fi
+            "$venv/bin/pip" install -q --upgrade pip
+            "$venv/bin/pip" install -q -r "$code/requirements.txt"
+            "$venv/bin/python" -c "import en_core_web_lg" 2>/dev/null || "$venv/bin/python" -m spacy download -q en_core_web_lg
+            sudo tee /etc/systemd/system/ewarp-classifier.service > /dev/null <<UNIT
+          [Unit]
+          Description=EWARP survey feature finder (classifier/README.md)
+          After=network-online.target postgresql.service
+          [Service]
+          User=$USER
+          WorkingDirectory=$code
+          EnvironmentFile=/etc/ewarp-classifier/env
+          Environment=CLASSIFIER_STATE_DIR=$state
+          Environment=SENSITIVE_TERMS_FILE=/etc/ewarp-classifier/sensitive_terms.json
+          Environment=PYTHONUNBUFFERED=1
+          ExecStart=$venv/bin/python backend_sync.py --watch
+          Restart=always
+          RestartSec=10
+          MemoryMax=1500M
+          [Install]
+          WantedBy=multi-user.target
+          UNIT
+            sudo systemctl daemon-reload
+            sudo systemctl enable --quiet ewarp-classifier
+            sudo systemctl restart ewarp-classifier
+            for attempt in {1..20}; do
+              sleep 1
+              sudo systemctl is-active --quiet ewarp-classifier || { echo "classifier did not stay up"; exit 1; }
+            done
+            sudo journalctl --no-pager --unit ewarp-classifier --lines 5
+          REMOTE_COMMANDS

@@ -48,7 +48,7 @@ public sealed class SurveySubmissionRepository(IConfiguration configuration) : I
         var vendorId = configReader.GetString(2);
         await configReader.CloseAsync();
 
-        const string group = "other";
+        var group = RespondentGroups.FromAnswers(submission.Answers);
         var likes = SurveyAnswerExtractor.ValueStartingWith(submission.Answers, SurveyAnswerExtractor.LikesPrefix);
         var dislikes = SurveyAnswerExtractor.ValueStartingWith(submission.Answers, SurveyAnswerExtractor.DislikesPrefix);
         var wants = SurveyAnswerExtractor.ValueStartingWith(submission.Answers, SurveyAnswerExtractor.WantsPrefix);

@@ -25,5 +25,5 @@ public sealed class ProjectApiController(ProjectReadRepository projects) : ApiCo
     [HttpGet("projects/{projectId}/analytics/coverage")]
     public async Task<IActionResult> Coverage(string projectId, CancellationToken ct) => (await projects.CoverageAsync(projectId, ct)) is { } coverage ? Ok(coverage) : NotFoundError($"Project {projectId} not found");
 
-    private static bool Valid(string? group, DateOnly? from, DateOnly? to) => (group is null or "pm" or "sponsor" or "other") && (!from.HasValue || !to.HasValue || from <= to);
+    private static bool Valid(string? group, DateOnly? from, DateOnly? to) => Data.RespondentGroups.IsValid(group) && (!from.HasValue || !to.HasValue || from <= to);
 }

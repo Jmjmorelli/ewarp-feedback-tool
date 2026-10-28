@@ -15,7 +15,9 @@ never his main key. Secrets live only in the server's env file, never in this pu
 
 Joe's ResponseAnalysisWorker stamps analyzed_at within 10 s without reading anything, so this keeps
 its own list of what it has read (classifier_done.json next to this file; the app's database user can't create tables). It only adds rows: features, mentions, and a
-vendor_offerings row when someone likes a feature. It never edits or deletes his rows.
+vendor_offerings row (vendor has this feature) for every like or dislike, using the vendor the survey
+answer was about (owner 2026-10-28, Shaq: "point to what vendor they did the survey on"). A want stays
+a gap: it means the vendor doesn't have it yet. It never edits or deletes his rows.
 Tables it uses: docs/API.md "Data model" in ShaqMiller/ewarp-feedback-tool.
 """
 from __future__ import annotations
@@ -128,7 +130,6 @@ def run_project(c: psycopg.Connection, project_id: str, responses: list[dict], d
     report["ai"] = usage
 
     # 4. write back: one feature per name per project, one mention per (response, feature, kind)
-    by_resp = {r["id"]: r for r in responses}
     count = {r["id"]: 0 for r in responses}
     new_features = 0
     with c.transaction():
@@ -150,11 +151,6 @@ def run_project(c: psycopg.Connection, project_id: str, responses: list[dict], d
                 c.execute("insert into mentions (id, response_id, feature_id, kind) values (%s, %s, %s, %s)",
                           ("mnt_" + uuid.uuid4().hex[:12], rid, fid, mn["kind"]))
                 count[rid] += 1
-            vendor = by_resp[rid]["vendor_id"]
-            if mn["kind"] == "like" and vendor:  # a 'like' proves that vendor has it
-                c.execute("""insert into vendor_offerings (vendor_id, feature_id) select %s, %s
-                             where not exists (select 1 from vendor_offerings where vendor_id = %s and feature_id = %s)""",
-                          (vendor, fid, vendor, fid))
         for r in responses:
             note = "held back: still sensitive" if any(h.startswith(r["id"] + "-") for h in held) else None
             done[r["id"]] = {"mentions": count[r["id"]], "note": note}
@@ -163,6 +159,19 @@ def run_project(c: psycopg.Connection, project_id: str, responses: list[dict], d
     report.update(mentions=sum(count.values()), new_features=new_features,
                   real_values_found_in_sent_request=[v["value"] for v in vault.by_token.values() if found(v["value"], sent)])
     return report
+
+
+def link_vendors(c: psycopg.Connection) -> int:
+    """Every like or dislike links the feature to the vendor that answer was about (no AI: the vendor
+    comes from the survey). Runs every pass, so answers read before this rule get their links too."""
+    with c.transaction():
+        n = c.execute("""insert into vendor_offerings (vendor_id, feature_id)
+            select distinct r.vendor_id, m.feature_id from mentions m join responses r on r.id = m.response_id
+            where m.kind in ('like', 'dislike') and r.vendor_id is not null
+              and not exists (select 1 from vendor_offerings o where o.vendor_id = r.vendor_id and o.feature_id = m.feature_id)""").rowcount
+    if n:
+        print(f"linked {n} feature(s) to their vendor", flush=True)
+    return n
 
 
 def once(dry: bool) -> list[dict]:
@@ -181,6 +190,8 @@ def once(dry: bool) -> list[dict]:
             reports.append(run_project(c, p, rs, dry, done))
             if not dry:  # saved only after that project's rows committed
                 DONE.write_text(json.dumps(done, indent=1), encoding="utf-8")
+        if not dry:
+            link_vendors(c)
     if reports:  # an empty last pass must not wipe the real report
         (OUT / "backend_run_report.json").write_text(json.dumps(reports, indent=1), encoding="utf-8")
     for rep in reports:

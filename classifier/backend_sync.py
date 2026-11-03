@@ -27,6 +27,7 @@ from __future__ import annotations
 
 import json
 import os
+import re
 import sys
 import time
 import uuid
@@ -40,20 +41,36 @@ from pipeline import found
 
 HERE = Path(__file__).resolve().parent
 OUT = Path(os.environ.get("CLASSIFIER_STATE_DIR") or HERE / "out")
-BOXES = (("like", "likes"), ("dislike", "dislikes"), ("want", "wants"), ("comment", "comment"))
+BOXES = (("like", "likes"), ("dislike", "dislikes"), ("want", "wants"))
 NAME_KEYS = ("full name", "name", "your name")
-COMMENT_PREFIX = "please provide any additional comments"  # Joe's responses table has no column for it
+# Survey questions that are picks, not written feedback (owner 2026-11-03: the role-based survey has ~15 written boxes
+# like "If you rated X low, why?" that were never read; read every written answer except these).
+NOT_FEEDBACK = ("primary role", "how long", "another role", "what platform are you answering")
 
 
 def _answers(answers) -> dict:
     return json.loads(answers) if isinstance(answers, str) else (answers or {})
 
 
-def _comment(answers) -> str:
+def _written(answers, skip: set[str]) -> list[tuple[str, str, str]]:
+    """Every written answer in the survey as (box, question, text). Skips names, picks, numbers, blanks, and
+    text already in the likes/dislikes/wants columns. "If you rated ... low" = dislike, asks for what's missing
+    or wanted = want, anything else = comment (the AI decides like, dislike or want)."""
+    out = []
     for q, a in _answers(answers).items():
-        if q.strip().lower().startswith(COMMENT_PREFIX) and isinstance(a, str):
-            return a
-    return ""
+        text = (", ".join(map(str, a)) if isinstance(a, list) else str(a if a is not None else "")).strip()
+        ql = q.strip().lower()
+        if (not text or ql in NAME_KEYS or any(k in ql for k in NOT_FEEDBACK)
+                or text.replace(".", "", 1).isdigit() or text.lower() in skip):
+            continue
+        if ql.startswith("if you rated"):
+            box = "dislike"
+        elif "missing" in ql or "would you like" in ql or "wish" in ql:
+            box = "want"
+        else:
+            box = "comment"
+        out.append((box, q.strip(), text))
+    return out
 
 
 def _known_terms() -> list[tuple[str, str]]:
@@ -91,7 +108,8 @@ def pending(c: psycopg.Connection, done: dict, limit: int = 50) -> list[dict]:
     keys = ("id", "project_id", "vendor_id", "likes", "dislikes", "wants", "answers", "reread")
     out = [dict(zip(keys, r)) for r in rows]
     for r in out:
-        r["comment"] = _comment(r["answers"])
+        cols = [(box, "", (r[field] or "").strip()) for box, field in BOXES]
+        r["texts"] = [t for t in cols if t[2]] + _written(r["answers"], {t[2].lower() for t in cols if t[2]})
     return out
 
 
@@ -109,15 +127,24 @@ def run_project(c: psycopg.Connection, project_id: str, responses: list[dict], d
     vault = mask.Vault()
     answers, held = [], []
     for r in responses:
-        for box, field in BOXES:
-            text = r[field] or ""
-            if not text.strip():
-                continue
+        for n, (box, question, text) in enumerate(r["texts"]):
+            aid = f"{r['id']}-{box}{n}"  # one id per box; mentions map back with rsplit("-", 1)
             m = mask.mask(text, vault, known)
             if mask.still_sensitive(m):
-                held.append(f"{r['id']}-{box}")  # NOT sent
-            else:
-                answers.append({"id": f"{r['id']}-{box}", "box": box, "text": m})
+                held.append(aid)  # NOT sent
+                continue
+            a = {"id": aid, "box": box, "text": m}
+            if question:
+                a["question"] = mask.mask(question, vault, known)
+            answers.append(a)
+    # The name finder isn't consistent ("PM Dashboard" hidden in one question, not the next), so swap every hidden
+    # value everywhere it still shows, longest first. The leak check below still has the last word.
+    for v in sorted(vault.by_token.items(), key=lambda kv: -len(kv[1]["value"])):
+        pat = re.compile(rf"(?<!\w){re.escape(v[1]['value'])}(?!\w)", re.I)
+        for a in answers:
+            for f in ("text", "question"):
+                if f in a:
+                    a[f] = pat.sub(v[0], a[f])
 
     # 2. leak check on the exact payload BEFORE it goes out
     payload = json.dumps(answers)

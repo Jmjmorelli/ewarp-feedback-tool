@@ -1,7 +1,7 @@
 # Survey feature finder (Dechante, Linear DIU-64)
 
 Runs on the team server as the `ewarp-classifier` service, installed by `.github/workflows/deploy.yml`.
-Every 30 s it reads new rows in `responses`, hides names / contract numbers / money / emails / phones,
+Every 30 s it reads new rows in `responses` (likes / dislikes / wants plus every written answer in the survey, each sent with its question; 2026-11-03), hides names / contract numbers / money / emails / phones,
 sends only the hidden text to DeepSeek V4.1 Flash (Experiential, free, zero-data-retention providers only,
 thinking off), and writes `features`, `mentions` and `vendor_offerings` back. Nothing is run by hand.
 Test on the 32 fake answers (2026-11-03): 77 and 78 of 79 right, 0 of 108 planted secrets sent, $0.00, about 18 s.

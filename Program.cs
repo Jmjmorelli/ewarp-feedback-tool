@@ -17,8 +17,8 @@ builder.Services.AddScoped<IVendorWriteRepository, VendorWriteRepository>();
 builder.Services.AddScoped<IResponseRepository, ResponseRepository>();
 builder.Services.AddScoped<ScoringRepository>();
 builder.Services.AddScoped<UserRepository>();
-// Sign-in tokens are signed with this key (see AuthTokens.LoadKeyAsync).
-var signingKey = await AuthTokens.LoadKeyAsync(builder.Configuration, CancellationToken.None);
+// Sign-in tokens are signed with JWT_SECRET from the environment (see AuthTokens.LoadKey).
+var signingKey = AuthTokens.LoadKey(builder.Configuration);
 builder.Services.AddSingleton(sp => new AuthTokens(sp.GetRequiredService<IConfiguration>(), signingKey));
 builder.Services.AddSingleton<DatabaseInitializer>();
 builder.Services.AddHostedService<ResponseAnalysisWorker>();

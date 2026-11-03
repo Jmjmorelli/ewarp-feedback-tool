@@ -1,9 +1,7 @@
 using System.Security.Claims;
-using System.Security.Cryptography;
 using System.Text;
 using Microsoft.IdentityModel.JsonWebTokens;
 using Microsoft.IdentityModel.Tokens;
-using Npgsql;
 
 namespace FeedbackTool.Data;
 
@@ -12,26 +10,13 @@ public sealed class AuthTokens(IConfiguration configuration, SymmetricSecurityKe
 {
     public const string Issuer = "ewarp-feedback-tool";
 
-    // The signing key: Auth:JwtSecret if it's set, otherwise a random one the backend creates on its first start
-    // and keeps in app_secrets, so tokens stay valid across restarts and deploys without any server setting.
-    public static async Task<SymmetricSecurityKey> LoadKeyAsync(IConfiguration configuration, CancellationToken ct)
+    // The signing key, like JWT_SECRET in an Express app: env JWT_SECRET or Auth__JwtSecret, 32+ characters.
+    // It only signs sign-in tokens; passwords are hashed with their own random salt (UserRepository).
+    public static SymmetricSecurityKey LoadKey(IConfiguration configuration)
     {
-        var secret = configuration["Auth:JwtSecret"];
-        if (string.IsNullOrWhiteSpace(secret))
-        {
-            var cs = configuration.GetConnectionString("DefaultConnection");
-            if (string.IsNullOrWhiteSpace(cs)) throw new InvalidOperationException("Database connection is not configured.");
-            await using var c = new NpgsqlConnection(cs);
-            await c.OpenAsync(ct);
-            await using (var insert = new NpgsqlCommand("insert into app_secrets (key, value) values ('jwt_signing_key', @value) on conflict (key) do nothing", c))
-            {
-                insert.Parameters.AddWithValue("value", Convert.ToHexString(RandomNumberGenerator.GetBytes(32)));
-                await insert.ExecuteNonQueryAsync(ct);
-            }
-            await using var select = new NpgsqlCommand("select value from app_secrets where key='jwt_signing_key'", c);
-            secret = (string)(await select.ExecuteScalarAsync(ct))!;
-        }
-        if (secret.Length < 32) throw new InvalidOperationException("Auth:JwtSecret must be at least 32 characters.");
+        var secret = configuration["JWT_SECRET"] ?? configuration["Auth:JwtSecret"];
+        if (string.IsNullOrWhiteSpace(secret) || secret.Length < 32)
+            throw new InvalidOperationException("Set JWT_SECRET (32+ characters) so the backend can sign sign-in tokens.");
         return new SymmetricSecurityKey(Encoding.UTF8.GetBytes(secret));
     }
 

@@ -17,11 +17,6 @@ public sealed class AuthController(UserRepository users, AuthTokens tokens) : Ap
         using var body = await ReadBodyAsync(Request, ct);
         if (body is null || !TryString(body.RootElement, "email", out var email) || !TryString(body.RootElement, "password", out var password))
             return BadRequestError("Enter your email and password.");
-        // TEMPORARY, remove once the first admin exists: with no users yet, the first sign-in creates an admin
-        // with that email and password. Until then, whoever signs in first becomes the admin.
-        if (!await users.AnyAsync(ct) && email.Contains('@') && password.Length is >= 8 and <= 128)
-            await users.CreateAsync(email, "Admin", password, Roles.Admin, ct);
-
         var user = await users.CheckPasswordAsync(email, password, ct);
         if (user is null) return Unauthorized(new { error = new { code = "invalid_credentials", message = "That email and password don't match." } });
         var (token, expiresAt) = tokens.Create(user);

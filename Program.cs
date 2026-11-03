@@ -16,6 +16,7 @@ builder.Services.AddScoped<IVendorReadRepository, VendorReadRepository>();
 builder.Services.AddScoped<IVendorWriteRepository, VendorWriteRepository>();
 builder.Services.AddScoped<IResponseRepository, ResponseRepository>();
 builder.Services.AddScoped<ScoringRepository>();
+builder.Services.AddScoped<RereadRepository>();
 builder.Services.AddScoped<UserRepository>();
 // Sign-in tokens are signed with JWT_SECRET from the environment (see AuthTokens.LoadKey).
 var signingKey = AuthTokens.LoadKey(builder.Configuration);

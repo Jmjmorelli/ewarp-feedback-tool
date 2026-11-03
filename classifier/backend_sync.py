@@ -14,7 +14,9 @@ never his main key. Secrets live only in the server's env file, never in this pu
     SENSITIVE_TERMS_FILE   real names to hide (default: sensitive_terms.json, else the example)
 
 Joe's ResponseAnalysisWorker stamps analyzed_at within 10 s without reading anything, so this keeps
-its own list of what it has read (classifier_done.json next to this file; the app's database user can't create tables). It only adds rows: features, mentions, and a
+its own list of what it has read (classifier_done.json next to this file; the app's database user can't create tables).
+An admin's "Reread with AI" button puts a response in response_rereads (Data/Migrations/002); the next pass reads it
+again even though it is on that list, then removes the row. It only adds rows: features, mentions, and a
 vendor_offerings row (vendor has this feature) for every like or dislike, using the vendor the survey
 answer was about (owner 2026-10-28, Shaq: "point to what vendor they did the survey on"). A want stays
 a gap: it means the vendor doesn't have it yet. It never edits or deletes his rows.
@@ -79,7 +81,7 @@ def pending(c: psycopg.Connection, done: dict, limit: int = 50) -> list[dict]:
     rows = c.execute("""
         select r.id, r.project_id, r.vendor_id, r.likes, r.dislikes, r.wants, s.answers
         from responses r left join survey_submissions s on s.id = r.raw_submission_id
-        where not (r.id = any(%s))
+        where not (r.id = any(%s)) or exists (select 1 from response_rereads x where x.response_id = r.id)
         order by r.submitted_at limit %s""", (list(done), limit)).fetchall()
     keys = ("id", "project_id", "vendor_id", "likes", "dislikes", "wants", "answers")
     out = [dict(zip(keys, r)) for r in rows]
@@ -154,6 +156,7 @@ def run_project(c: psycopg.Connection, project_id: str, responses: list[dict], d
         for r in responses:
             note = "held back: still sensitive" if any(h.startswith(r["id"] + "-") for h in held) else None
             done[r["id"]] = {"mentions": count[r["id"]], "note": note}
+        c.execute("delete from response_rereads where response_id = any(%s)", ([r["id"] for r in responses],))
 
     sent = (OUT / "backend_sent_to_ai.json").read_text(encoding="utf-8") if answers else ""
     report.update(mentions=sum(count.values()), new_features=new_features,

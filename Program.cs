@@ -77,17 +77,6 @@ var app = builder.Build();
 if (app.Configuration.GetValue<bool>("Database:InitializeOnStartup"))
     await app.Services.GetRequiredService<DatabaseInitializer>().InitializeAsync(CancellationToken.None);
 
-// Optional: create the first admin from Auth:BootstrapAdminEmail / Auth:BootstrapAdminPassword when there are no users yet.
-// Without them, add the first admin with Data/Migrations/create-user.mjs.
-using (var scope = app.Services.CreateScope())
-{
-    var email = app.Configuration["Auth:BootstrapAdminEmail"];
-    var password = app.Configuration["Auth:BootstrapAdminPassword"];
-    var users = scope.ServiceProvider.GetRequiredService<UserRepository>();
-    if (!string.IsNullOrWhiteSpace(email) && !string.IsNullOrWhiteSpace(password) && !await users.AnyAsync(CancellationToken.None))
-        await users.CreateAsync(email, "Admin", password, Roles.Admin, CancellationToken.None);
-}
-
 app.UseRateLimiter();
 app.UseAuthentication();
 app.UseAuthorization();

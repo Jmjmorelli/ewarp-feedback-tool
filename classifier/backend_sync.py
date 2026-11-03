@@ -8,8 +8,8 @@
 Automatic (owner 2026-10-28 "make it automatic", replaces the one-run rule of 2026-10-23), and it runs on
 the team server (owner 2026-10-28 "make everything run through the server they setup") as systemd service
 ewarp-classifier, installed by .github/workflows/deploy.yml.
-AI key: RIGHTCODES_API_KEY = a separate capped RightCodes claude-aws key just for the server (owner's pick),
-never his main key. Secrets live only in the server's env file, never in this public repo:
+AI key: EXPERIENTIAL_API_KEY (DeepSeek V4.1 Flash, owner 2026-11-03; was RightCodes Sonnet),
+Secrets live only in the server's env file, never in this public repo:
     CLASSIFIER_STATE_DIR   where the done-list and run logs go (default: ./out next to this file)
     SENSITIVE_TERMS_FILE   real names to hide (default: sensitive_terms.json, else the example)
 

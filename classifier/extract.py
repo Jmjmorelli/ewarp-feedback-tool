@@ -14,11 +14,15 @@ import os
 
 import anthropic
 
-MODEL = "claude-sonnet-5"
-# Sonnet through RightCodes /claude-aws (owner 2026-10-28, replaces the direct key of 10-23).
-# Key: env RIGHTCODES_API_KEY (claude-main, Life OS/Secrets/RightCodes.md). Never commit it.
-BASE_URL = "https://right.codes/claude-aws"
-KEY_ENV = "RIGHTCODES_API_KEY"
+MODEL = os.environ.get("CLASSIFIER_MODEL", "deepseek-v4.1-flash")
+# DeepSeek V4.1 Flash through Experiential (owner 2026-11-03 "use deepseek flash for the ai model as it is free",
+# replaces Sonnet via RightCodes of 10-28). Anthropic-style /v1/messages endpoint.
+# Key: env EXPERIENTIAL_API_KEY. Never commit it.
+BASE_URL = "https://api.experientiallabs.ai"
+KEY_ENV = "EXPERIENTIAL_API_KEY"
+# Only providers that keep nothing (zero data retention) may serve the request.
+# Thinking off: with it on, the model spent all 16000 output tokens thinking and returned no JSON (2026-11-03 test).
+ROUTING = {"provider": {"zdr": True}, "thinking": {"type": "disabled"}}
 
 
 def _client() -> anthropic.Anthropic:
@@ -62,7 +66,7 @@ def extract(answers: list[dict], topics: list[str], seen: list[str], sent_log: P
     for attempt in range(1, 4):
         try:
             t0 = time.time()
-            reply = _client().messages.create(**body).to_dict()
+            reply = _client().messages.create(**body, extra_body=ROUTING).to_dict()
             break
         except (anthropic.APIConnectionError, anthropic.RateLimitError, anthropic.InternalServerError) as e:
             print(f"  AI call attempt {attempt} failed: {e}")

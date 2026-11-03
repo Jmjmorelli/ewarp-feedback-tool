@@ -81,22 +81,22 @@ jobs:
             sudo systemctl --no-pager --full status "$VPS_SERVICE_NAME"
           REMOTE_COMMANDS
 
-      # Survey feature finder (classifier/README.md). Skipped when the CLASSIFIER_RIGHTCODES_KEY secret is not set.
+      # Survey feature finder (classifier/README.md). Skipped when the CLASSIFIER_EXPERIENTIAL_KEY secret is not set. AI = DeepSeek V4.1 Flash via Experiential (owner 2026-11-03).
       - name: Classifier service
         env:
           VPS_HOST: ${{ secrets.VPS_HOST }}
           VPS_USER: ${{ secrets.VPS_USER }}
           VPS_APP_DIR: ${{ secrets.VPS_APP_DIR }}
-          CLASSIFIER_RIGHTCODES_KEY: ${{ secrets.CLASSIFIER_RIGHTCODES_KEY }}
+          CLASSIFIER_EXPERIENTIAL_KEY: ${{ secrets.CLASSIFIER_EXPERIENTIAL_KEY }}
           CLASSIFIER_DATABASE_URL: ${{ secrets.CLASSIFIER_DATABASE_URL }}
           CLASSIFIER_SENSITIVE_TERMS: ${{ secrets.CLASSIFIER_SENSITIVE_TERMS }}
         run: |
-          if [ -z "$CLASSIFIER_RIGHTCODES_KEY" ] || [ -z "$CLASSIFIER_DATABASE_URL" ]; then
+          if [ -z "$CLASSIFIER_EXPERIENTIAL_KEY" ] || [ -z "$CLASSIFIER_DATABASE_URL" ]; then
             echo "Classifier secrets not set, skipping the classifier."
             exit 0
           fi
           # secrets go straight into root-only files on the server, never into the repo or the log
-          printf 'RIGHTCODES_API_KEY=%s\nDATABASE_URL=%s\n' "$CLASSIFIER_RIGHTCODES_KEY" "$CLASSIFIER_DATABASE_URL" |
+          printf 'EXPERIENTIAL_API_KEY=%s\nDATABASE_URL=%s\n' "$CLASSIFIER_EXPERIENTIAL_KEY" "$CLASSIFIER_DATABASE_URL" |
             ssh "$VPS_USER@$VPS_HOST" 'sudo install -D -m 600 -o root -g root /dev/stdin /etc/ewarp-classifier/env'
           terms="$CLASSIFIER_SENSITIVE_TERMS"
           [ -n "$terms" ] || terms='{"terms": []}'

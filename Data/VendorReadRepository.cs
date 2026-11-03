@@ -18,7 +18,8 @@ public sealed class VendorReadRepository(IConfiguration configuration) : IVendor
         var where = ResponseWhere(filter, "r", includeVendor: false);
         var sql = $$"""
             with filtered_responses as (select r.* from responses r where {{where}}),
-            request_features as (select distinct m.feature_id from mentions m join filtered_responses r on r.id=m.response_id where m.kind='want'),
+            filtered_mentions as (select fm.* from feedback_mentions fm where {{MentionWhere(filter)}}),
+            request_features as (select distinct m.feature_id from filtered_mentions m where m.kind='want'),
             vendor_metrics as (
               select v.id, v.name, (select fc.form from form_configurations fc where fc.vendor_id=v.id limit 1) as form,
                 (select count(*) from filtered_responses r where r.vendor_id=v.id)::int as response_count,
@@ -26,9 +27,9 @@ public sealed class VendorReadRepository(IConfiguration configuration) : IVendor
                 (select count(*) from request_features)::int as requests_total,
                 (select count(*) from vendor_offerings vo where vo.vendor_id=v.id)::int as feature_count,
                 (select count(*) from vendor_offerings vo where vo.vendor_id=v.id and not exists (select 1 from vendor_offerings other where other.feature_id=vo.feature_id and other.vendor_id<>v.id))::int as exclusive_count,
-                (select count(*) from mentions m join filtered_responses r on r.id=m.response_id where r.vendor_id=v.id and m.kind='like')::int as likes,
-                (select count(*) from mentions m join filtered_responses r on r.id=m.response_id where r.vendor_id=v.id and m.kind='dislike')::int as dislikes,
-                (select count(*) from mentions m join filtered_responses r on r.id=m.response_id where r.vendor_id=v.id and m.kind='want')::int as wants
+                (select count(*) from filtered_mentions m where m.vendor_id=v.id and m.kind='like')::int as likes,
+                (select count(*) from filtered_mentions m where m.vendor_id=v.id and m.kind='dislike')::int as dislikes,
+                (select count(*) from filtered_mentions m where m.vendor_id=v.id and m.kind='want')::int as wants
               from vendors v where v.project_id=@projectId)
             select id, name, form, response_count, requests_met, requests_total, feature_count, exclusive_count, likes, dislikes, wants,
                    count(*) over()::int as total
@@ -49,16 +50,16 @@ public sealed class VendorReadRepository(IConfiguration configuration) : IVendor
     {
         await using var connection = await OpenAsync(cancellationToken);
         const string sql = """
-            with request_features as (select distinct m.feature_id from mentions m join responses r on r.id=m.response_id where r.project_id=@projectId and m.kind='want')
+            with request_features as (select distinct m.feature_id from feedback_mentions m where m.project_id=@projectId and m.kind='want')
             select v.id,v.name,(select fc.form from form_configurations fc where fc.vendor_id=v.id limit 1),
               (select count(*) from responses r where r.project_id=@projectId and r.vendor_id=v.id)::int,
               (select count(*) from vendor_offerings vo join request_features rf on rf.feature_id=vo.feature_id where vo.vendor_id=v.id)::int,
               (select count(*) from request_features)::int,
               (select count(*) from vendor_offerings vo where vo.vendor_id=v.id)::int,
               (select count(*) from vendor_offerings vo where vo.vendor_id=v.id and not exists (select 1 from vendor_offerings o where o.feature_id=vo.feature_id and o.vendor_id<>v.id))::int,
-              (select count(*) from mentions m join responses r on r.id=m.response_id where r.project_id=@projectId and r.vendor_id=v.id and m.kind='like')::int,
-              (select count(*) from mentions m join responses r on r.id=m.response_id where r.project_id=@projectId and r.vendor_id=v.id and m.kind='dislike')::int,
-              (select count(*) from mentions m join responses r on r.id=m.response_id where r.project_id=@projectId and r.vendor_id=v.id and m.kind='want')::int
+              (select count(*) from feedback_mentions m where m.project_id=@projectId and m.vendor_id=v.id and m.kind='like')::int,
+              (select count(*) from feedback_mentions m where m.project_id=@projectId and m.vendor_id=v.id and m.kind='dislike')::int,
+              (select count(*) from feedback_mentions m where m.project_id=@projectId and m.vendor_id=v.id and m.kind='want')::int
             from vendors v where v.project_id=@projectId and v.id=@vendorId;
             """;
         await using var command = new NpgsqlCommand(sql, connection); command.Parameters.AddWithValue("projectId", projectId); command.Parameters.AddWithValue("vendorId", vendorId);
@@ -87,11 +88,10 @@ public sealed class VendorReadRepository(IConfiguration configuration) : IVendor
     public async Task<VendorRequestList?> GetRequestsAsync(string projectId, string vendorId, VendorFilter filter, CancellationToken cancellationToken)
     {
         await using var connection = await OpenAsync(cancellationToken);
-        var where = ResponseWhere(filter, "r", false);
         var sql = $$"""
             with target as (select 1 from vendors where project_id=@projectId and id=@vendorId),
-            filtered_responses as (select r.* from responses r where {{where}}),
-            requests as (select f.id,f.name,count(m.id)::int as wants from features f join mentions m on m.feature_id=f.id join filtered_responses r on r.id=m.response_id where m.kind='want' and f.project_id=@projectId group by f.id,f.name)
+            filtered_mentions as (select fm.* from feedback_mentions fm where {{MentionWhere(filter)}}),
+            requests as (select f.id,f.name,count(m.id)::int as wants from features f join filtered_mentions m on m.feature_id=f.id where m.kind='want' and f.project_id=@projectId group by f.id,f.name)
             select r.id,r.name,exists(select 1 from vendor_offerings vo where vo.vendor_id=@vendorId and vo.feature_id=r.id),r.wants,count(*) over()::int
             from requests r where exists(select 1 from target) order by 3 desc,r.wants desc,r.name asc;
             """;
@@ -107,13 +107,12 @@ public sealed class VendorReadRepository(IConfiguration configuration) : IVendor
     public async Task<VendorFeatureList?> GetFeaturesAsync(string projectId, string vendorId, VendorFilter filter, CancellationToken cancellationToken)
     {
         await using var connection = await OpenAsync(cancellationToken);
-        var where = ResponseWhere(filter, "r", false) + " and r.vendor_id=@vendorId";
         var sql = $$"""
-            with target as (select 1 from vendors where project_id=@projectId and id=@vendorId), filtered_responses as (select r.* from responses r where {{where}})
+            with target as (select 1 from vendors where project_id=@projectId and id=@vendorId), filtered_mentions as (select fm.* from feedback_mentions fm where {{MentionWhere(filter)}} and fm.vendor_id=@vendorId)
             select f.id,f.name,not exists(select 1 from vendor_offerings o where o.feature_id=f.id and o.vendor_id<>@vendorId),
-              (select count(*) from mentions m join filtered_responses r on r.id=m.response_id where m.feature_id=f.id and m.kind='like')::int,
-              (select count(*) from mentions m join filtered_responses r on r.id=m.response_id where m.feature_id=f.id and m.kind='dislike')::int,
-              (select count(*) from mentions m join filtered_responses r on r.id=m.response_id where m.feature_id=f.id and m.kind='want')::int,
+              (select count(*) from filtered_mentions m where m.feature_id=f.id and m.kind='like')::int,
+              (select count(*) from filtered_mentions m where m.feature_id=f.id and m.kind='dislike')::int,
+              (select count(*) from filtered_mentions m where m.feature_id=f.id and m.kind='want')::int,
               count(*) over()::int
             from features f join vendor_offerings vo on vo.feature_id=f.id and vo.vendor_id=@vendorId
             where f.project_id=@projectId and exists(select 1 from target)
@@ -159,6 +158,8 @@ public sealed class VendorReadRepository(IConfiguration configuration) : IVendor
     private static VendorListItem ReadVendor(NpgsqlDataReader r) => new(r.GetString(0),r.GetString(1),r.IsDBNull(2) ? null : r.GetString(2),r.GetInt32(3),r.GetInt32(4),r.GetInt32(5),r.GetInt32(6),r.GetInt32(7),new SentimentCounts(r.GetInt32(8),r.GetInt32(9),r.GetInt32(10)));
     private async Task<NpgsqlConnection> OpenAsync(CancellationToken ct) { var cs=configuration.GetConnectionString("DefaultConnection"); if(string.IsNullOrWhiteSpace(cs))throw new InvalidOperationException("Database connection is not configured."); var c=new NpgsqlConnection(cs); await c.OpenAsync(ct); return c; }
     private static string ResponseWhere(VendorFilter filter,string alias,bool includeVendor) { var clauses=new List<string>{$"{alias}.project_id=@projectId"}; if(includeVendor)clauses.Add($"{alias}.vendor_id=@vendorId"); if(filter.From.HasValue)clauses.Add($"{alias}.submitted_at>=@from"); if(filter.To.HasValue)clauses.Add($"{alias}.submitted_at<@toExclusive"); if(filter.Group is not null)clauses.Add($"({alias}.respondent_group=@group or {alias}.respondent_role=@group)"); return string.Join(" and ",clauses); }
+    // The same filters over feedback_mentions (survey mentions plus manual entries), which dates by occurred_at.
+    private static string MentionWhere(VendorFilter filter) => ResponseWhere(filter, "fm", false).Replace("fm.submitted_at", "fm.occurred_at");
     private static void AddFilterParameters(NpgsqlCommand c,string projectId,VendorFilter f,string? vendorId=null) { c.Parameters.AddWithValue("projectId",projectId); if(vendorId is not null)c.Parameters.AddWithValue("vendorId",vendorId); if(f.From.HasValue)c.Parameters.AddWithValue("from",new DateTimeOffset(f.From.Value.ToDateTime(TimeOnly.MinValue),TimeSpan.Zero)); if(f.To.HasValue)c.Parameters.AddWithValue("toExclusive",new DateTimeOffset(f.To.Value.AddDays(1).ToDateTime(TimeOnly.MinValue),TimeSpan.Zero)); if(f.Group is not null)c.Parameters.AddWithValue("group",f.Group); }
     private static async Task<bool> VendorExistsAsync(NpgsqlConnection c,string projectId,string vendorId,CancellationToken ct) { await using var cmd=new NpgsqlCommand("select exists(select 1 from vendors where project_id=@projectId and id=@vendorId)",c);cmd.Parameters.AddWithValue("projectId",projectId);cmd.Parameters.AddWithValue("vendorId",vendorId);return (bool)(await cmd.ExecuteScalarAsync(ct)??false); }
 }

@@ -19,6 +19,14 @@ public static class RespondentGroups
 
     public static readonly string[] All = ["pm", "pd", "pa", "congo", "acquisition", "data_cell", "comops", "wit", "sponsor", Other];
 
+    // Names shown in Settings → weights and on manual feedback.
+    public static readonly IReadOnlyDictionary<string, string> Labels = new Dictionary<string, string>
+    {
+        ["pm"] = "Project Manager", ["pd"] = "Portfolio Director", ["pa"] = "Portfolio Analyst", ["congo"] = "Congressional",
+        ["acquisition"] = "Acquisition", ["data_cell"] = "Data Cell", ["comops"] = "ComOps", ["wit"] = "Warfighter",
+        ["sponsor"] = "Sponsor's team", [Other] = "Other",
+    };
+
     public static bool IsValid(string? group) => group is null || All.Contains(group);
 
     public static string Legacy(string role) => role is "pm" or "sponsor" ? role : Other;

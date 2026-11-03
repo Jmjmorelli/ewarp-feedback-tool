@@ -62,6 +62,9 @@ public sealed class VendorWriteRepository(IConfiguration configuration, IVendorR
             var ids = featureIds.Distinct(StringComparer.Ordinal).ToArray();
             foreach (var featureId in ids)
                 if (!await FeatureExistsAsync(connection, projectId, featureId, ct)) return VendorWriteResult.Error(400, "bad_request", $"Unknown feature ID: {featureId}");
+            // Pairs taken off are remembered so the classifier doesn't add them back; pairs put back are forgotten.
+            await ExecuteAsync(connection, tx, "insert into vendor_offering_removals (vendor_id, feature_id) select vendor_id, feature_id from vendor_offerings where vendor_id=@vendorId and not (feature_id=any(@ids)) on conflict do nothing", ct, ("vendorId", vendorId), ("ids", ids));
+            await ExecuteAsync(connection, tx, "delete from vendor_offering_removals where vendor_id=@vendorId and feature_id=any(@ids)", ct, ("vendorId", vendorId), ("ids", ids));
             await ExecuteAsync(connection, tx, "delete from vendor_offerings where vendor_id=@vendorId", ct, ("vendorId", vendorId));
             foreach (var featureId in ids)
                 await ExecuteAsync(connection, tx, "insert into vendor_offerings (vendor_id, feature_id) values (@vendorId,@featureId)", ct, ("vendorId", vendorId), ("featureId", featureId));
@@ -81,6 +84,8 @@ public sealed class VendorWriteRepository(IConfiguration configuration, IVendorR
         var count = await ScalarIntAsync(connection, "select count(*)::int from responses where vendor_id=@vendorId", ct, ("vendorId", vendorId));
         if (count > 0) return VendorWriteResult.Error(409, "conflict", $"{existing.Name} has {count} responses, so it can't be deleted. Move or remove them first.");
         await ExecuteAsync(connection, tx, "delete from vendor_offerings where vendor_id=@vendorId", ct, ("vendorId", vendorId));
+        await ExecuteAsync(connection, tx, "delete from vendor_offering_removals where vendor_id=@vendorId", ct, ("vendorId", vendorId));
+        await ExecuteAsync(connection, tx, "update feedback_entries set vendor_id=null where vendor_id=@vendorId", ct, ("vendorId", vendorId));
         await ExecuteAsync(connection, tx, "delete from form_configurations where vendor_id=@vendorId", ct, ("vendorId", vendorId));
         if (existing.SurveyId is not null)
             await ExecuteAsync(connection, tx, "delete from surveys s where s.id=@surveyId and not exists(select 1 from form_configurations fc where fc.survey_id=s.id) and not exists(select 1 from responses r where r.survey_id=s.id)", ct, ("surveyId", existing.SurveyId));

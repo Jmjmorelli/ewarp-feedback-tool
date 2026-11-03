@@ -1,10 +1,12 @@
 using FeedbackTool.Data;
 using FeedbackTool.Models;
+using Microsoft.AspNetCore.Authorization;
 using Microsoft.AspNetCore.Mvc;
 
 namespace FeedbackTool.Endpoints;
 
 [ApiController]
+[AllowAnonymous] // Google Apps Script posts here without a token
 [Route("webhook/google-form")]
 public sealed class GoogleFormWebhookController(ISurveySubmissionRepository submissions) : ControllerBase
 {

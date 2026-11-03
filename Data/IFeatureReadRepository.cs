@@ -14,8 +14,9 @@ public sealed record ResponseFilters(DateOnly? From, DateOnly? To, string? Group
 public sealed record FeatureListQuery(string View, string? Search, string Sort, int? Limit, ResponseFilters Filters);
 public sealed record FeatureResponseQuery(string? Kind, int? Limit, ResponseFilters Filters);
 public sealed record SentimentDto(int Like, int Dislike, int Want);
-public sealed record FeatureListItemDto(string Id, string Name, string Coverage, string[] VendorIds, int Mentions, SentimentDto Sentiment);
-public sealed record FeatureDto(string Id, string Name, string Coverage, string[] VendorIds, int Mentions, SentimentDto Sentiment, DateTimeOffset CreatedAt);
+// Source: "survey" (found by the classifier) or "manual" (added by an admin). Weight: how much it counts in vendor scores.
+public sealed record FeatureListItemDto(string Id, string Name, string Coverage, string[] VendorIds, int Mentions, SentimentDto Sentiment, string Source, double Weight);
+public sealed record FeatureDto(string Id, string Name, string Coverage, string[] VendorIds, int Mentions, SentimentDto Sentiment, string Source, double Weight, DateTimeOffset CreatedAt);
 public sealed record FeatureListResult(IReadOnlyList<FeatureListItemDto> Items, int Total, FeatureFacetsDto Facets);
 public sealed record FeatureFacetsDto(int All, int Requested, int Gap, int Pain);
 public sealed record AiSummaryDto(string? Text, int BasedOn, DateTimeOffset? GeneratedAt);

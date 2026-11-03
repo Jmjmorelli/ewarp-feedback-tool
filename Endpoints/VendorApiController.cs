@@ -1,4 +1,5 @@
 using FeedbackTool.Data;
+using Microsoft.AspNetCore.Authorization;
 using Microsoft.AspNetCore.Mvc;
 using System.Text.Json;
 
@@ -6,8 +7,9 @@ namespace FeedbackTool.Endpoints;
 
 [ApiController]
 [Route("api/v1/projects/{projectId}/vendors")]
-public sealed class VendorApiController(IVendorReadRepository vendors, IVendorWriteRepository vendorWrites) : ControllerBase
+public sealed class VendorApiController(IVendorReadRepository vendors, IVendorWriteRepository vendorWrites, ScoringRepository scoring) : ControllerBase
 {
+    [Authorize(Policy = Policies.Admin)]
     [HttpPost]
     public async Task<IActionResult> Create(string projectId, CancellationToken ct)
     {
@@ -21,6 +23,7 @@ public sealed class VendorApiController(IVendorReadRepository vendors, IVendorWr
         return ToResult(await vendorWrites.CreateAsync(projectId, name, form, ct));
     }
 
+    [Authorize(Policy = Policies.Admin)]
     [HttpPatch("{vendorId}")]
     public async Task<IActionResult> Update(string projectId, string vendorId, CancellationToken ct)
     {
@@ -59,6 +62,7 @@ public sealed class VendorApiController(IVendorReadRepository vendors, IVendorWr
         return ToResult(await vendorWrites.UpdateAsync(projectId, vendorId, name, form, featureIds, ct));
     }
 
+    [Authorize(Policy = Policies.Admin)]
     [HttpDelete("{vendorId}")]
     public async Task<IActionResult> Delete(string projectId, string vendorId, CancellationToken ct) => ToResult(await vendorWrites.DeleteAsync(projectId, vendorId, ct));
 
@@ -67,10 +71,18 @@ public sealed class VendorApiController(IVendorReadRepository vendors, IVendorWr
     {
         var error=Validate(sort,limit,from,to,group, true); if(error is not null)return error;
         if(!await vendors.ProjectExistsAsync(projectId,ct))return NotFoundProject(projectId);
-        return Ok(await vendors.ListAsync(projectId,new(from,to,group),sort ?? "fit",limit,ct));
+        // Scores always use every response (filters don't change them). sort=score (the default) ranks by score, then fit.
+        sort ??= "score";
+        var list = await vendors.ListAsync(projectId,new(from,to,group),sort == "score" ? "fit" : sort,sort == "score" ? null : limit,ct);
+        var scores = await ScoresAsync(projectId,ct);
+        var items = list.Items.Select(v => v with { Score = scores.GetValueOrDefault(v.Id) });
+        if (sort == "score") items = items.OrderByDescending(v => v.Score);
+        if (sort == "score" && limit.HasValue) items = items.Take(limit.Value);
+        return Ok(new VendorListResult(items.ToList(),list.Total));
     }
     [HttpGet("{vendorId}")]
-    public async Task<IActionResult> Get(string projectId,string vendorId,CancellationToken ct) => await vendors.GetAsync(projectId,vendorId,ct) is { } item ? Ok(item) : NotFoundVendor(vendorId);
+    public async Task<IActionResult> Get(string projectId,string vendorId,CancellationToken ct) => await vendors.GetAsync(projectId,vendorId,ct) is { } item ? Ok(item with { Score = (await ScoresAsync(projectId,ct)).GetValueOrDefault(vendorId) }) : NotFoundVendor(vendorId);
+    private async Task<Dictionary<string,int>> ScoresAsync(string projectId,CancellationToken ct) => (await scoring.GetScoresAsync(projectId,ct))?.Items.ToDictionary(x => x.Vendor.Id, x => x.Score) ?? [];
     [HttpGet("{vendorId}/summary")]
     public async Task<IActionResult> Summary(string projectId,string vendorId,CancellationToken ct) => await vendors.GetSummaryAsync(projectId,vendorId,ct) is { } item ? Ok(item) : NotFoundVendor(vendorId);
     [HttpGet("{vendorId}/requests")]
@@ -82,7 +94,7 @@ public sealed class VendorApiController(IVendorReadRepository vendors, IVendorWr
     [HttpGet("{vendorId}/responses")]
     public async Task<IActionResult> Responses(string projectId,string vendorId,[FromQuery] int? limit,[FromQuery(Name="from")] DateOnly? from,[FromQuery(Name="to")] DateOnly? to,[FromQuery(Name="group")] string? group,CancellationToken ct)
     { var error=Validate(null,limit,from,to,group,false); if(error is not null)return error; return await vendors.GetResponsesAsync(projectId,vendorId,new(from,to,group),limit,ct) is { } item ? Ok(item) : NotFoundVendor(vendorId); }
-    private IActionResult? Validate(string? sort,int? limit,DateOnly? from,DateOnly? to,string? group,bool validateSort) { if(validateSort && sort is not null && sort is not ("fit" or "name"))return Bad("sort must be fit or name"); if(limit is <=0 or >500)return Bad("limit must be between 1 and 500"); if(!Data.RespondentGroups.IsValid(group))return Bad("group must be one of: "+string.Join(", ",Data.RespondentGroups.All)); if(from>to)return Bad("from must be on or before to"); return null; }
+    private IActionResult? Validate(string? sort,int? limit,DateOnly? from,DateOnly? to,string? group,bool validateSort) { if(validateSort && sort is not null && sort is not ("score" or "fit" or "name"))return Bad("sort must be score, fit or name"); if(limit is <=0 or >500)return Bad("limit must be between 1 and 500"); if(!Data.RespondentGroups.IsValid(group))return Bad("group must be one of: "+string.Join(", ",Data.RespondentGroups.All)); if(from>to)return Bad("from must be on or before to"); return null; }
     private ObjectResult NotFoundProject(string id)=>NotFound(new {error=new {code="not_found",message=$"Project {id} not found"}});
     private ObjectResult NotFoundVendor(string id)=>NotFound(new {error=new {code="not_found",message=$"Vendor {id} not found"}});
     private ObjectResult Bad(string message)=>BadRequest(new {error=new {code="bad_request",message}});

@@ -141,7 +141,7 @@ def run_project(c: psycopg.Connection, project_id: str, responses: list[dict], d
             fid = existing.get(name.lower())
             if fid is None:
                 fid = "ftr_" + uuid.uuid4().hex[:12]
-                c.execute("insert into features (id, project_id, name, created_at) values (%s, %s, %s, now())",
+                c.execute("insert into features (id, project_id, name, created_at, source) values (%s, %s, %s, now(), 'survey')",
                           (fid, project_id, name))
                 existing[name.lower()] = fid
                 new_features += 1
@@ -163,12 +163,14 @@ def run_project(c: psycopg.Connection, project_id: str, responses: list[dict], d
 
 def link_vendors(c: psycopg.Connection) -> int:
     """Every like or dislike links the feature to the vendor that answer was about (no AI: the vendor
-    comes from the survey). Runs every pass, so answers read before this rule get their links too."""
+    comes from the survey). Runs every pass, so answers read before this rule get their links too.
+    Skips pairs an admin took off in the app (vendor_offering_removals), so their edit sticks."""
     with c.transaction():
         n = c.execute("""insert into vendor_offerings (vendor_id, feature_id)
             select distinct r.vendor_id, m.feature_id from mentions m join responses r on r.id = m.response_id
             where m.kind in ('like', 'dislike') and r.vendor_id is not null
-              and not exists (select 1 from vendor_offerings o where o.vendor_id = r.vendor_id and o.feature_id = m.feature_id)""").rowcount
+              and not exists (select 1 from vendor_offerings o where o.vendor_id = r.vendor_id and o.feature_id = m.feature_id)
+              and not exists (select 1 from vendor_offering_removals x where x.vendor_id = r.vendor_id and x.feature_id = m.feature_id)""").rowcount
     if n:
         print(f"linked {n} feature(s) to their vendor", flush=True)
     return n

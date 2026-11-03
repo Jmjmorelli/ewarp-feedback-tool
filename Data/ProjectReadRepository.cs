@@ -50,7 +50,7 @@ public sealed class ProjectReadRepository(IConfiguration configuration)
         if (!await ExistsAsync(projectId, ct)) return null;
         const string sql = """
             with filtered as (select * from responses r where r.project_id=@id and (@from is null or r.submitted_at >= @from) and (@to is null or r.submitted_at < @to + interval '1 day') and (@group is null or (r.respondent_group=@group or r.respondent_role=@group))),
-            fm as (select m.* from mentions m join filtered r on r.id=m.response_id)
+            fm as (select x.* from feedback_mentions x where x.project_id=@id and (@from is null or x.occurred_at >= @from) and (@to is null or x.occurred_at < @to + interval '1 day') and (@group is null or (x.respondent_group=@group or x.respondent_role=@group)))
             select (select count(*)::int from filtered),
               (select count(*)::int from filtered where submitted_at >= now() - interval '7 days'),
               (select count(*)::int from features where project_id=@id),

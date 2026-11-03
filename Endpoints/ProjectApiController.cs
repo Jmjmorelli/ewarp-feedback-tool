@@ -6,9 +6,6 @@ namespace FeedbackTool.Endpoints;
 [Route("api/v1")]
 public sealed class ProjectApiController(ProjectReadRepository projects) : ApiControllerBase
 {
-    [HttpGet("me")]
-    public object Me() => new { id = "usr_system", name = "Program office", role = "Admin" };
-
     [HttpGet("projects")]
     public async Task<object> List(CancellationToken ct) { var items = await projects.ListProjectsAsync(ct); return new { items, total = items.Count }; }
 

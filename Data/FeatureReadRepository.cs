@@ -10,10 +10,10 @@ public sealed class FeatureReadRepository(IConfiguration configuration) : IFeatu
         if (!await ProjectExistsAsync(projectId, ct)) return null;
         const string sql = """
                            with filtered_mentions as (
-                             select m.feature_id, m.kind from mentions m join responses r on r.id=m.response_id
-                             where r.project_id=@projectId and (@from is null or r.submitted_at >= @from)
-                               and (@toExclusive is null or r.submitted_at < @toExclusive)
-                               and (@group is null or (r.respondent_group=@group or r.respondent_role=@group))
+                             select fm.feature_id, fm.kind from feedback_mentions fm
+                             where fm.project_id=@projectId and (@from is null or fm.occurred_at >= @from)
+                               and (@toExclusive is null or fm.occurred_at < @toExclusive)
+                               and (@group is null or (fm.respondent_group=@group or fm.respondent_role=@group))
                            ), offerings as (
                              select vo.feature_id, array_agg(vo.vendor_id order by vo.vendor_id) vendor_ids, count(*) offering_count
                              from vendor_offerings vo join vendors v on v.id=vo.vendor_id where v.project_id=@projectId group by vo.feature_id
@@ -22,11 +22,11 @@ public sealed class FeatureReadRepository(IConfiguration configuration) : IFeatu
                                coalesce(o.offering_count,0)::int offering_count, count(fm.feature_id)::int mentions,
                                count(*) filter (where fm.kind='like')::int likes, count(*) filter (where fm.kind='dislike')::int dislikes,
                                count(*) filter (where fm.kind='want')::int wants,
-                               (select count(*) from vendors where project_id=@projectId)::int vendor_count
+                               (select count(*) from vendors where project_id=@projectId)::int vendor_count, f.source, f.weight::float8 weight
                              from features f left join filtered_mentions fm on fm.feature_id=f.id left join offerings o on o.feature_id=f.id
                              where f.project_id=@projectId and (@search is null or f.name ilike '%' || @search || '%')
-                             group by f.id, f.name, f.created_at, o.vendor_ids, o.offering_count
-                           ) select id,name,created_at,vendor_ids,offering_count,mentions,likes,dislikes,wants,vendor_count from stats;
+                             group by f.id, f.name, f.created_at, f.source, f.weight, o.vendor_ids, o.offering_count
+                           ) select id,name,created_at,vendor_ids,offering_count,mentions,likes,dislikes,wants,vendor_count,source,weight from stats;
                            """;
         await using var connection = await OpenAsync(ct);
         await using var cmd = new NpgsqlCommand(sql, connection);
@@ -59,7 +59,7 @@ public sealed class FeatureReadRepository(IConfiguration configuration) : IFeatu
         return row is null
             ? null
             : new FeatureDto(row.Id, row.Name, Coverage(row), row.VendorIds, row.Mentions,
-                new(row.Likes, row.Dislikes, row.Wants), row.CreatedAt);
+                new(row.Likes, row.Dislikes, row.Wants), row.Source, row.Weight, row.CreatedAt);
     }
 
     public async Task<AiSummaryDto?> GetSummaryAsync(string projectId, string featureId, CancellationToken ct)
@@ -113,7 +113,7 @@ public sealed class FeatureReadRepository(IConfiguration configuration) : IFeatu
     {
         if (!await ExistsAsync(projectId, featureId, ct)) return null;
         const string sql =
-            """select v.id,v.name,exists(select 1 from vendor_offerings vo where vo.vendor_id=v.id and vo.feature_id=@featureId), count(m.id) filter(where m.kind='like')::int,count(m.id) filter(where m.kind='dislike')::int,count(m.id) filter(where m.kind='want')::int from vendors v left join responses r on r.vendor_id=v.id left join mentions m on m.response_id=r.id and m.feature_id=@featureId where v.project_id=@projectId group by v.id,v.name order by exists(select 1 from vendor_offerings vo where vo.vendor_id=v.id and vo.feature_id=@featureId) desc,v.name""";
+            """select v.id,v.name,exists(select 1 from vendor_offerings vo where vo.vendor_id=v.id and vo.feature_id=@featureId), count(fm.id) filter(where fm.kind='like')::int,count(fm.id) filter(where fm.kind='dislike')::int,count(fm.id) filter(where fm.kind='want')::int from vendors v left join feedback_mentions fm on fm.vendor_id=v.id and fm.feature_id=@featureId where v.project_id=@projectId group by v.id,v.name order by exists(select 1 from vendor_offerings vo where vo.vendor_id=v.id and vo.feature_id=@featureId) desc,v.name""";
         await using var c = await OpenAsync(ct);
         await using var cmd = new NpgsqlCommand(sql, c);
         cmd.Parameters.AddWithValue("projectId", projectId);
@@ -153,7 +153,7 @@ public sealed class FeatureReadRepository(IConfiguration configuration) : IFeatu
         CancellationToken ct)
     {
         const string sql =
-            """with fm as (select m.feature_id,m.kind from mentions m join responses r on r.id=m.response_id where r.project_id=@projectId and (@from is null or r.submitted_at>=@from) and (@toExclusive is null or r.submitted_at<@toExclusive) and (@group is null or (r.respondent_group=@group or r.respondent_role=@group))),o as(select vo.feature_id,array_agg(vo.vendor_id order by vo.vendor_id) ids,count(*) offers from vendor_offerings vo join vendors v on v.id=vo.vendor_id where v.project_id=@projectId group by vo.feature_id) select f.id,f.name,f.created_at,coalesce(o.ids,array[]::text[]),coalesce(o.offers,0)::int,count(fm.feature_id)::int,count(*) filter(where fm.kind='like')::int,count(*) filter(where fm.kind='dislike')::int,count(*) filter(where fm.kind='want')::int,(select count(*) from vendors where project_id=@projectId)::int from features f left join fm on fm.feature_id=f.id left join o on o.feature_id=f.id where f.project_id=@projectId and f.id=@featureId group by f.id,f.name,f.created_at,o.ids,o.offers""";
+            """with fm as (select x.feature_id,x.kind from feedback_mentions x where x.project_id=@projectId and (@from is null or x.occurred_at>=@from) and (@toExclusive is null or x.occurred_at<@toExclusive) and (@group is null or (x.respondent_group=@group or x.respondent_role=@group))),o as(select vo.feature_id,array_agg(vo.vendor_id order by vo.vendor_id) ids,count(*) offers from vendor_offerings vo join vendors v on v.id=vo.vendor_id where v.project_id=@projectId group by vo.feature_id) select f.id,f.name,f.created_at,coalesce(o.ids,array[]::text[]),coalesce(o.offers,0)::int,count(fm.feature_id)::int,count(*) filter(where fm.kind='like')::int,count(*) filter(where fm.kind='dislike')::int,count(*) filter(where fm.kind='want')::int,(select count(*) from vendors where project_id=@projectId)::int,f.source,f.weight::float8 from features f left join fm on fm.feature_id=f.id left join o on o.feature_id=f.id where f.project_id=@projectId and f.id=@featureId group by f.id,f.name,f.created_at,f.source,f.weight,o.ids,o.offers""";
         await using var c = await OpenAsync(ct);
         await using var cmd = new NpgsqlCommand(sql, c);
         AddFilters(cmd, projectId, filters ?? new(null, null, null));
@@ -210,7 +210,7 @@ public sealed class FeatureReadRepository(IConfiguration configuration) : IFeatu
 
     private static FeatureRow ReadFeatureRow(NpgsqlDataReader r) => new(r.GetString(0), r.GetString(1),
         r.GetFieldValue<DateTimeOffset>(2), r.GetFieldValue<string[]>(3), r.GetInt32(4), r.GetInt32(5), r.GetInt32(6),
-        r.GetInt32(7), r.GetInt32(8), r.GetInt32(9));
+        r.GetInt32(7), r.GetInt32(8), r.GetInt32(9), r.GetString(10), r.GetDouble(11));
 
     private static bool IsRequested(FeatureRow r) => r.Wants > 0;
     private static bool IsGap(FeatureRow r) => r.OfferingCount == 0;
@@ -220,7 +220,7 @@ public sealed class FeatureReadRepository(IConfiguration configuration) : IFeatu
         r.OfferingCount == 0 ? "none" : r.OfferingCount == r.VendorCount ? "all" : "some";
 
     private static FeatureListItemDto ToListItem(FeatureRow r) => new(r.Id, r.Name, Coverage(r), r.VendorIds,
-        r.Mentions, new(r.Likes, r.Dislikes, r.Wants));
+        r.Mentions, new(r.Likes, r.Dislikes, r.Wants), r.Source, r.Weight);
 
     private sealed record FeatureRow(
         string Id,
@@ -232,5 +232,7 @@ public sealed class FeatureReadRepository(IConfiguration configuration) : IFeatu
         int Likes,
         int Dislikes,
         int Wants,
-        int VendorCount);
+        int VendorCount,
+        string Source,
+        double Weight);
 }

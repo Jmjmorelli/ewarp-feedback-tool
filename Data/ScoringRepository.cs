@@ -17,13 +17,15 @@ public sealed record VendorScoreList(IReadOnlyList<VendorScoreDto> Items, int To
 // Every like / dislike / want (survey or manual) counts its group's weight; every feature counts its own weight.
 //   demand(f)       = sum of group weights over f's wants, project-wide
 //   coverage(v)     = sum(fw * demand * offers) / sum(fw * demand)              0..1, the share of weighted demand v meets
-//   satisfaction(v) = sum(fw * gw * (like - dislike)) / sum(fw * gw * (like + dislike)), over the features v offers, -1..1
+//   satisfaction(v) = sum(fw * gw * (like - dislike)) / (sum(fw * gw * (like + dislike)) + NeutralVotes), over the features v offers, -1..1
 //   score(v)        = 100 * (CoverageShare * coverage + SatisfactionShare * (satisfaction + 1) / 2)
-// No demand at all counts as full coverage; no likes or dislikes counts as neutral satisfaction (0).
+// No demand at all counts as full coverage. Every vendor starts with NeutralVotes neutral votes, so a little feedback
+// moves satisfaction a little, more feedback moves it further, and feature and group weights matter even for one feature.
 public sealed class ScoringRepository(IConfiguration configuration)
 {
     public const double CoverageShare = 0.7;
     public const double SatisfactionShare = 0.3;
+    public const double NeutralVotes = 3;
 
     public async Task<WeightsDto?> GetWeightsAsync(string projectId, CancellationToken ct)
     {
@@ -99,7 +101,7 @@ public sealed class ScoringRepository(IConfiguration configuration)
             volume += f.Weight * (likes.GetValueOrDefault((vendor.Id, f.Id)) + dislikes.GetValueOrDefault((vendor.Id, f.Id)));
         }
         var coverage = totalDemand > 0 ? metDemand / totalDemand : 1;
-        var satisfaction = volume > 0 ? net / volume : 0;
+        var satisfaction = net / (volume + NeutralVotes);
         var score = (int)Math.Round(100 * (CoverageShare * coverage + SatisfactionShare * (satisfaction + 1) / 2));
 
         // Points each feature adds on top of the neutral baseline (a met want adds, a missed want adds nothing, a dislike takes away).
@@ -112,7 +114,7 @@ public sealed class ScoringRepository(IConfiguration configuration)
             var dislike = offered ? dislikes.GetValueOrDefault((vendor.Id, f.Id)) : 0;
             if (want == 0 && like == 0 && dislike == 0) continue;
             var points = (totalDemand > 0 && offered ? 100 * CoverageShare * f.Weight * want / totalDemand : 0)
-                         + (volume > 0 ? 100 * SatisfactionShare / 2 * f.Weight * (like - dislike) / volume : 0);
+                         + 100 * SatisfactionShare / 2 * f.Weight * (like - dislike) / (volume + NeutralVotes);
             lines.Add(new(new(f.Id, f.Name), f.Weight, want, offered, like, dislike, Math.Round(points, 1)));
         }
         lines.Sort((a, b) => Math.Abs(b.Contribution).CompareTo(Math.Abs(a.Contribution)));

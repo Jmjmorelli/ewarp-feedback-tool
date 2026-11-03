@@ -17,7 +17,9 @@ builder.Services.AddScoped<IVendorWriteRepository, VendorWriteRepository>();
 builder.Services.AddScoped<IResponseRepository, ResponseRepository>();
 builder.Services.AddScoped<ScoringRepository>();
 builder.Services.AddScoped<UserRepository>();
-builder.Services.AddSingleton<AuthTokens>();
+// Sign-in tokens are signed with this key (see AuthTokens.LoadKeyAsync).
+var signingKey = await AuthTokens.LoadKeyAsync(builder.Configuration, CancellationToken.None);
+builder.Services.AddSingleton(sp => new AuthTokens(sp.GetRequiredService<IConfiguration>(), signingKey));
 builder.Services.AddSingleton<DatabaseInitializer>();
 builder.Services.AddHostedService<ResponseAnalysisWorker>();
 
@@ -29,7 +31,7 @@ builder.Services.AddAuthentication(JwtBearerDefaults.AuthenticationScheme).AddJw
     {
         ValidIssuer = AuthTokens.Issuer,
         ValidAudience = AuthTokens.Issuer,
-        IssuerSigningKey = AuthTokens.Key(builder.Configuration),
+        IssuerSigningKey = signingKey,
         NameClaimType = "sub",
         RoleClaimType = "role",
         ClockSkew = TimeSpan.FromMinutes(1),
@@ -75,7 +77,8 @@ var app = builder.Build();
 if (app.Configuration.GetValue<bool>("Database:InitializeOnStartup"))
     await app.Services.GetRequiredService<DatabaseInitializer>().InitializeAsync(CancellationToken.None);
 
-// The first admin: created from Auth:BootstrapAdminEmail / Auth:BootstrapAdminPassword when there are no users yet.
+// Optional: create the first admin from Auth:BootstrapAdminEmail / Auth:BootstrapAdminPassword when there are no users yet.
+// Without them, add the first admin with Data/Migrations/create-user.mjs.
 using (var scope = app.Services.CreateScope())
 {
     var email = app.Configuration["Auth:BootstrapAdminEmail"];

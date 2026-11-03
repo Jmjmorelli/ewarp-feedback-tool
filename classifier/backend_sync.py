@@ -16,8 +16,8 @@ never his main key. Secrets live only in the server's env file, never in this pu
 Joe's ResponseAnalysisWorker stamps analyzed_at within 10 s without reading anything, so this keeps
 its own list of what it has read (classifier_done.json next to this file; the app's database user can't create tables).
 An admin's "Reread with AI" button stamps responses.analysis_error with "reread:<time>" (Data/RereadRepository.cs);
-a response whose stamp differs from the one saved in the done-list is read again. It never writes that column.
-It only adds rows: features, mentions, and a
+a response whose stamp differs from the one saved in the done-list is read again, then the stamp is cleared (the
+app shows "In queue" while it is there). That clear is the only change it makes to his rows. It only adds rows: features, mentions, and a
 vendor_offerings row (vendor has this feature) for every like or dislike, using the vendor the survey
 answer was about (owner 2026-10-28, Shaq: "point to what vendor they did the survey on"). A want stays
 a gap: it means the vendor doesn't have it yet. It never edits or deletes his rows.
@@ -168,6 +168,18 @@ def run_project(c: psycopg.Connection, project_id: str, responses: list[dict], d
     return report
 
 
+def clear_rereads(c: psycopg.Connection, done: dict) -> None:
+    """Takes reread responses out of the app's "In queue" state once they're read. Only clears the exact stamp
+    that was handled, so a newer click survives. Best effort: if it fails, the done-list still stops a second read."""
+    handled = [f"{rid}|{d['reread']}" for rid, d in done.items() if d.get("reread")]
+    try:
+        with c.transaction():
+            c.execute("update responses set analysis_error = null where analysis_error like %s "
+                      "and id || '|' || analysis_error = any(%s)", (REREAD + "%", handled))
+    except psycopg.Error as e:
+        print(f"could not clear reread stamps: {e}", flush=True)
+
+
 def link_vendors(c: psycopg.Connection) -> int:
     """Every like or dislike links the feature to the vendor that answer was about (no AI: the vendor
     comes from the survey). Runs every pass, so answers read before this rule get their links too.
@@ -201,6 +213,7 @@ def once(dry: bool) -> list[dict]:
                 DONE.write_text(json.dumps(done, indent=1), encoding="utf-8")
         if not dry:
             link_vendors(c)
+            clear_rereads(c, done)
     if reports:  # an empty last pass must not wipe the real report
         (OUT / "backend_run_report.json").write_text(json.dumps(reports, indent=1), encoding="utf-8")
     for rep in reports:

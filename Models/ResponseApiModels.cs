@@ -37,7 +37,8 @@ public sealed record ResponseDetailDto(
     string Wants,
     bool Analyzed,
     NamedReference Survey,
-    IReadOnlyList<ResponseMentionDetailDto> Mentions);
+    IReadOnlyList<ResponseMentionDetailDto> Mentions,
+    bool RereadQueued = false); // an admin asked the AI to read it again and it hasn't yet
 
 public sealed class ResponseListQuery
 {

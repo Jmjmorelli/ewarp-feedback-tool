@@ -29,7 +29,7 @@ public sealed class RereadController(RereadRepository rereads) : ApiControllerBa
                 if (ids.Count is 0 or > MaxIds) return BadRequestError($"responseIds must have 1 to {MaxIds} IDs.");
             }
         }
-        var result = await rereads.QueueAsync(projectId, ids, User.UserId(), ct);
+        var result = await rereads.QueueAsync(projectId, ids, ct);
         if (result is null) return NotFoundError($"Project {projectId} not found");
         if (result.Value.UnknownResponse is { } unknown) return NotFoundError($"Response {unknown} not found in project {projectId}");
         return Accepted(new { queued = result.Value.Queued });

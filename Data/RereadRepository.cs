@@ -2,14 +2,18 @@ using Npgsql;
 
 namespace FeedbackTool.Data;
 
-// Queues responses for the classifier to read again (table response_rereads, Migrations/002).
-// The classifier (classifier/backend_sync.py) reads every queued response on its next pass, adds any new
-// features and mentions, and removes the row. Existing mentions stay; it only adds what it finds.
+// Asks the classifier to read responses again, with no schema change: it stamps responses.analysis_error with
+// "reread:<time>". That column is otherwise only cleared by ResponseAnalysisWorker, for responses not stamped yet
+// (which the classifier reads anyway). The classifier (classifier/backend_sync.py) rereads any response whose stamp
+// differs from the one it last handled, remembers that stamp in its own done-list, and never writes the column.
+// It only adds features and mentions; existing ones stay.
 public sealed class RereadRepository(IConfiguration configuration)
 {
+    public const string Marker = "reread:";
+
     // responseIds = null queues every response in the project that has no linked features yet.
     // Returns null when the project does not exist, else (queued count, first ID not in the project).
-    public async Task<(int Queued, string? UnknownResponse)?> QueueAsync(string projectId, IReadOnlyList<string>? responseIds, string userId, CancellationToken ct)
+    public async Task<(int Queued, string? UnknownResponse)?> QueueAsync(string projectId, IReadOnlyList<string>? responseIds, CancellationToken ct)
     {
         var cs = configuration.GetConnectionString("DefaultConnection");
         if (string.IsNullOrWhiteSpace(cs)) throw new InvalidOperationException("Database connection is not configured.");
@@ -30,17 +34,15 @@ public sealed class RereadRepository(IConfiguration configuration)
         }
 
         const string sql = """
-            insert into response_rereads (response_id, requested_at, requested_by)
-            select r.id, now(), @userId from responses r
+            update responses r set analysis_error = @marker || to_char(clock_timestamp() at time zone 'utc', 'YYYY-MM-DD"T"HH24:MI:SS.US"Z"')
             where r.project_id=@projectId
-              and (case when @all then not exists(select 1 from mentions m where m.response_id=r.id) else r.id = any(@ids) end)
-            on conflict (response_id) do update set requested_at=excluded.requested_at, requested_by=excluded.requested_by;
+              and (case when @all then not exists(select 1 from mentions m where m.response_id=r.id) else r.id = any(@ids) end);
             """;
-        await using var insert = new NpgsqlCommand(sql, c);
-        insert.Parameters.AddWithValue("projectId", projectId);
-        insert.Parameters.AddWithValue("userId", userId);
-        insert.Parameters.AddWithValue("all", responseIds is null);
-        insert.Parameters.AddWithValue("ids", (responseIds ?? []).ToArray());
-        return (await insert.ExecuteNonQueryAsync(ct), null);
+        await using var update = new NpgsqlCommand(sql, c);
+        update.Parameters.AddWithValue("marker", Marker);
+        update.Parameters.AddWithValue("projectId", projectId);
+        update.Parameters.AddWithValue("all", responseIds is null);
+        update.Parameters.AddWithValue("ids", (responseIds ?? []).ToArray());
+        return (await update.ExecuteNonQueryAsync(ct), null);
     }
 }

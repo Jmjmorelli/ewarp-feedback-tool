@@ -15,8 +15,9 @@ never his main key. Secrets live only in the server's env file, never in this pu
 
 Joe's ResponseAnalysisWorker stamps analyzed_at within 10 s without reading anything, so this keeps
 its own list of what it has read (classifier_done.json next to this file; the app's database user can't create tables).
-An admin's "Reread with AI" button puts a response in response_rereads (Data/Migrations/002); the next pass reads it
-again even though it is on that list, then removes the row. It only adds rows: features, mentions, and a
+An admin's "Reread with AI" button stamps responses.analysis_error with "reread:<time>" (Data/RereadRepository.cs);
+a response whose stamp differs from the one saved in the done-list is read again. It never writes that column.
+It only adds rows: features, mentions, and a
 vendor_offerings row (vendor has this feature) for every like or dislike, using the vendor the survey
 answer was about (owner 2026-10-28, Shaq: "point to what vendor they did the survey on"). A want stays
 a gap: it means the vendor doesn't have it yet. It never edits or deletes his rows.
@@ -70,7 +71,8 @@ def _respondent_name(answers) -> str:
 
 
 DONE = (OUT / "classifier_done.json") if os.environ.get("CLASSIFIER_STATE_DIR") else HERE / "classifier_done.json"
-# {response_id: {"mentions": n, "note": ...}}
+# {response_id: {"mentions": n, "note": ..., "reread": the "reread:<time>" stamp handled, if any}}
+REREAD = "reread:"
 
 
 def load_done() -> dict:
@@ -78,12 +80,15 @@ def load_done() -> dict:
 
 
 def pending(c: psycopg.Connection, done: dict, limit: int = 50) -> list[dict]:
+    handled = [f"{rid}|{d['reread']}" for rid, d in done.items() if d.get("reread")]
     rows = c.execute("""
-        select r.id, r.project_id, r.vendor_id, r.likes, r.dislikes, r.wants, s.answers
+        select r.id, r.project_id, r.vendor_id, r.likes, r.dislikes, r.wants, s.answers,
+               case when r.analysis_error like %s then r.analysis_error end
         from responses r left join survey_submissions s on s.id = r.raw_submission_id
-        where not (r.id = any(%s)) or exists (select 1 from response_rereads x where x.response_id = r.id)
-        order by r.submitted_at limit %s""", (list(done), limit)).fetchall()
-    keys = ("id", "project_id", "vendor_id", "likes", "dislikes", "wants", "answers")
+        where not (r.id = any(%s))
+           or (r.analysis_error like %s and r.id || '|' || r.analysis_error <> all(%s))
+        order by r.submitted_at limit %s""", (REREAD + "%", list(done), REREAD + "%", handled, limit)).fetchall()
+    keys = ("id", "project_id", "vendor_id", "likes", "dislikes", "wants", "answers", "reread")
     out = [dict(zip(keys, r)) for r in rows]
     for r in out:
         r["comment"] = _comment(r["answers"])
@@ -155,8 +160,7 @@ def run_project(c: psycopg.Connection, project_id: str, responses: list[dict], d
                 count[rid] += 1
         for r in responses:
             note = "held back: still sensitive" if any(h.startswith(r["id"] + "-") for h in held) else None
-            done[r["id"]] = {"mentions": count[r["id"]], "note": note}
-        c.execute("delete from response_rereads where response_id = any(%s)", ([r["id"] for r in responses],))
+            done[r["id"]] = {"mentions": count[r["id"]], "note": note, "reread": r["reread"]}
 
     sent = (OUT / "backend_sent_to_ai.json").read_text(encoding="utf-8") if answers else ""
     report.update(mentions=sum(count.values()), new_features=new_features,

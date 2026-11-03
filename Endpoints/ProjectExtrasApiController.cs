@@ -73,7 +73,7 @@ public sealed class ProjectExtrasApiController(IConfiguration configuration) : A
         await c.OpenAsync(ct);
         var responses = await ReadResponses(c, projectId, from, to, group, ct);
         const string fsql =
-            """select f.id,f.name,count(o.vendor_id)::int,(select count(*)::int from vendors where project_id=@projectId),coalesce(array_agg(o.vendor_id) filter(where o.vendor_id is not null),array[]::text[]) from features f left join vendor_offerings o on o.feature_id=f.id where f.project_id=@projectId group by f.id,f.name having count(o.vendor_id)>0 or exists(select 1 from mentions m join responses r on r.id=m.response_id where m.feature_id=f.id and r.project_id=@projectId and (@from is null or r.submitted_at>=@from) and (@to is null or r.submitted_at<@to+interval '1 day') and (@group is null or (r.respondent_group=@group or r.respondent_role=@group)));""";
+            """select f.id,f.name,count(o.vendor_id)::int,(select count(*)::int from vendors where project_id=@projectId),coalesce(array_agg(o.vendor_id) filter(where o.vendor_id is not null),array[]::text[]),f.source from features f left join vendor_offerings o on o.feature_id=f.id where f.project_id=@projectId group by f.id,f.name,f.source having count(o.vendor_id)>0 or f.source='manual' or exists(select 1 from mentions m join responses r on r.id=m.response_id where m.feature_id=f.id and r.project_id=@projectId and (@from is null or r.submitted_at>=@from) and (@to is null or r.submitted_at<@to+interval '1 day') and (@group is null or (r.respondent_group=@group or r.respondent_role=@group))) or exists(select 1 from feedback_entries e where e.feature_id=f.id and e.project_id=@projectId and (@from is null or e.created_at>=@from) and (@to is null or e.created_at<@to+interval '1 day') and (@group is null or (e.respondent_group=@group or e.respondent_role=@group))));""";
         var features = new List<object>();
         await using (var cmd = new NpgsqlCommand(fsql, c))
         {
@@ -87,7 +87,8 @@ public sealed class ProjectExtrasApiController(IConfiguration configuration) : A
                 {
                     id = r.GetString(0), name = r.GetString(1),
                     coverage = offered == 0 ? "none" : offered == total ? "all" : "some",
-                    vendorIds = r.GetFieldValue<string[]>(4)
+                    vendorIds = r.GetFieldValue<string[]>(4),
+                    source = r.GetString(5)
                 });
             }
         }
@@ -112,7 +113,26 @@ public sealed class ProjectExtrasApiController(IConfiguration configuration) : A
                 links.Add(new { responseId = r.GetString(0), featureId = r.GetString(1), kind = r.GetString(2) });
         }
 
-        return Ok(new { responses, features, vendors, links });
+        // Likes / dislikes / wants admins entered by hand (feature page "Added by admins"); the map draws them from one "Admins" node.
+        const string msql =
+            """select e.id,e.feature_id,e.kind,e.respondent_role,v.id,v.name,e.note,u.id,u.name,e.created_at from feedback_entries e left join vendors v on v.id=e.vendor_id left join users u on u.id=e.created_by where e.project_id=@projectId and (@from is null or e.created_at>=@from) and (@to is null or e.created_at<@to+interval '1 day') and (@group is null or (e.respondent_group=@group or e.respondent_role=@group)) order by e.created_at desc,e.id desc;""";
+        var manual = new List<object>();
+        await using (var cmd = new NpgsqlCommand(msql, c))
+        {
+            AddFilters(cmd, projectId, from, to, group);
+            await using var r = await cmd.ExecuteReaderAsync(ct);
+            while (await r.ReadAsync(ct))
+                manual.Add(new
+                {
+                    id = r.GetString(0), featureId = r.GetString(1), kind = r.GetString(2), group = r.GetString(3),
+                    vendor = r.IsDBNull(4) ? null : new { id = r.GetString(4), name = r.GetString(5) },
+                    note = r.GetString(6),
+                    createdBy = r.IsDBNull(7) ? null : new { id = r.GetString(7), name = r.GetString(8) },
+                    createdAt = r.GetFieldValue<DateTimeOffset>(9)
+                });
+        }
+
+        return Ok(new { responses, features, vendors, links, manual });
     }
 
     [HttpGet("activity")]

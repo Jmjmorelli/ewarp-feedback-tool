@@ -53,8 +53,9 @@ public sealed class ResponseRepository(IConfiguration configuration) : IResponse
         if (!await ProjectExistsAsync(connection, projectId, cancellationToken)) return null;
         const string sql = """
             select r.id, r.survey_id, r.respondent_group, v.id, v.name, r.submitted_at, r.likes, r.dislikes, r.wants,
-                   r.analyzed_at is not null, s.id, s.name, coalesce(r.analysis_error like 'reread:%', false)
+                   r.analyzed_at is not null, s.id, s.name, coalesce(r.analysis_error like 'reread:%', false), sub.answers::text
             from responses r join vendors v on v.id = r.vendor_id join surveys s on s.id = r.survey_id
+            left join survey_submissions sub on sub.id = r.raw_submission_id
             where r.project_id = @projectId and r.id = @responseId;
             """;
         await using var command = new NpgsqlCommand(sql, connection);
@@ -64,7 +65,8 @@ public sealed class ResponseRepository(IConfiguration configuration) : IResponse
         var id = reader.GetString(0);
         var result = new ResponseDetailDto(id, reader.GetString(1), reader.GetString(2), new NamedReference(reader.GetString(3), reader.GetString(4)),
             reader.GetFieldValue<DateTimeOffset>(5), reader.GetString(6), reader.GetString(7), reader.GetString(8), reader.GetBoolean(9),
-            new NamedReference(reader.GetString(10), reader.GetString(11)), Array.Empty<ResponseMentionDetailDto>(), reader.GetBoolean(12));
+            new NamedReference(reader.GetString(10), reader.GetString(11)), Array.Empty<ResponseMentionDetailDto>(), reader.GetBoolean(12),
+            reader.IsDBNull(13) ? [] : SurveyAnswerExtractor.OtherAnswers(reader.GetString(13)));
         await reader.CloseAsync();
         const string mentionsSql = """
             select f.id, f.name, m.kind,

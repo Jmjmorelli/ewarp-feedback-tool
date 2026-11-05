@@ -80,6 +80,13 @@ public sealed class ProjectReadRepository(IConfiguration configuration)
         return new { all = r.GetInt32(0), some = r.GetInt32(1), none = r.GetInt32(2), total = r.GetInt32(3) };
     }
 
+    // The project's name, or null when it does not exist.
+    public async Task<string?> NameAsync(string projectId, CancellationToken ct)
+    {
+        await using var c = new NpgsqlConnection(ConnectionString); await c.OpenAsync(ct); await using var cmd = new NpgsqlCommand("select name from projects where id=@id", c); cmd.Parameters.AddWithValue("id", projectId);
+        return await cmd.ExecuteScalarAsync(ct) as string;
+    }
+
     public async Task<bool> ExistsAsync(string projectId, CancellationToken ct)
     {
         await using var c = new NpgsqlConnection(ConnectionString); await c.OpenAsync(ct); await using var cmd = new NpgsqlCommand("select exists(select 1 from projects where id=@id)", c); cmd.Parameters.AddWithValue("id", projectId);

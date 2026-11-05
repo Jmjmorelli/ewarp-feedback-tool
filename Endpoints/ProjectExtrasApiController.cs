@@ -45,13 +45,21 @@ public sealed class ProjectExtrasApiController(IConfiguration configuration) : A
     public async Task<IActionResult> Surveys(string projectId, CancellationToken ct)
     {
         if (!await Exists(projectId, ct)) return NotFoundError($"Project {projectId} not found");
+        var items = await ReadSurveys(projectId, null, ct);
+        return Ok(new { items, total = items.Count });
+    }
+
+    // Every survey in the project, or just surveyId, in the Survey shape (counts include excluded surveys' responses).
+    private async Task<List<object>> ReadSurveys(string projectId, string? surveyId, CancellationToken ct)
+    {
         const string sql =
-            """select s.id,s.name,s.source,s.status,s.created_at,s.included_in_analysis,s.exclusion_reason,s.excluded_at,u.id,u.name,count(r.id)::int,count(r.id) filter(where r.analyzed_at is not null)::int,count(distinct r.vendor_id)::int,max(r.submitted_at),count(r.id) filter(where r.respondent_group='pm')::int,count(r.id) filter(where r.respondent_group='sponsor')::int,count(r.id) filter(where r.respondent_group not in ('pm','sponsor'))::int from surveys s left join users u on u.id=s.excluded_by_user_id left join responses r on r.survey_id=s.id where s.project_id=@projectId group by s.id,s.name,s.source,s.status,s.created_at,s.included_in_analysis,s.exclusion_reason,s.excluded_at,u.id,u.name order by s.created_at desc;""";
+            """select s.id,s.name,s.source,s.status,s.created_at,s.included_in_analysis,s.exclusion_reason,s.excluded_at,u.id,u.name,count(r.id)::int,count(r.id) filter(where r.analyzed_at is not null)::int,count(distinct r.vendor_id)::int,max(r.submitted_at),count(r.id) filter(where r.respondent_group='pm')::int,count(r.id) filter(where r.respondent_group='sponsor')::int,count(r.id) filter(where r.respondent_group not in ('pm','sponsor'))::int from surveys s left join users u on u.id=s.excluded_by_user_id left join responses r on r.survey_id=s.id where s.project_id=@projectId and (@surveyId::text is null or s.id=@surveyId) group by s.id,s.name,s.source,s.status,s.created_at,s.included_in_analysis,s.exclusion_reason,s.excluded_at,u.id,u.name order by s.created_at desc;""";
         var items = new List<object>();
         await using var c = new NpgsqlConnection(Cs);
         await c.OpenAsync(ct);
         await using var cmd = new NpgsqlCommand(sql, c);
         cmd.Parameters.AddWithValue("projectId", projectId);
+        cmd.Parameters.Add(new NpgsqlParameter("surveyId", NpgsqlDbType.Text) { Value = (object?)surveyId ?? DBNull.Value });
         await using var r = await cmd.ExecuteReaderAsync(ct);
         while (await r.ReadAsync(ct))
             items.Add(new
@@ -65,7 +73,7 @@ public sealed class ProjectExtrasApiController(IConfiguration configuration) : A
                 lastResponseAt = r.IsDBNull(13) ? (DateTimeOffset?)null : r.GetFieldValue<DateTimeOffset>(13),
                 groups = new { pm = r.GetInt32(14), sponsor = r.GetInt32(15), other = r.GetInt32(16) }
             });
-        return Ok(new { items, total = items.Count });
+        return items;
     }
 
     [HttpPatch("surveys/{surveyId}")]
@@ -106,15 +114,9 @@ public sealed class ProjectExtrasApiController(IConfiguration configuration) : A
         cmd.Parameters.AddWithValue("userId", userId);
         cmd.Parameters.AddWithValue("projectId", projectId);
         cmd.Parameters.AddWithValue("surveyId", surveyId);
-        await using var r = await cmd.ExecuteReaderAsync(ct);
-        if (!await r.ReadAsync(ct)) return NotFoundError($"Survey {surveyId} was not found in project {projectId}");
-        return Ok(new
-        {
-            id = r.GetString(0), includedInAnalysis = r.GetBoolean(1),
-            exclusionReason = r.IsDBNull(2) ? null : r.GetString(2),
-            excludedAt = r.IsDBNull(3) ? (DateTimeOffset?)null : r.GetFieldValue<DateTimeOffset>(3),
-            excludedBy = r.IsDBNull(4) ? null : new { id = r.GetString(4), name = r.GetString(5) }
-        });
+        await using (var r = await cmd.ExecuteReaderAsync(ct))
+            if (!await r.ReadAsync(ct)) return NotFoundError($"Survey {surveyId} was not found in project {projectId}");
+        return Ok((await ReadSurveys(projectId, surveyId, ct)).Single());
     }
 
     [HttpGet("graph")]

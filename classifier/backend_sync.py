@@ -52,12 +52,23 @@ def _answers(answers) -> dict:
     return json.loads(answers) if isinstance(answers, str) else (answers or {})
 
 
+def _leaf_answers(answers):
+    """Yield question/value pairs from legacy flat answers or sectioned Google Form answers."""
+    def walk(values):
+        for question, value in values.items():
+            if isinstance(value, dict):
+                yield from walk(value)
+            else:
+                yield question, value
+    return walk(_answers(answers))
+
+
 def _written(answers, skip: set[str]) -> list[tuple[str, str, str]]:
     """Every written answer in the survey as (box, question, text). Skips names, picks, numbers, blanks, and
     text already in the likes/dislikes/wants columns. "If you rated ... low" = dislike, asks for what's missing
     or wanted = want, anything else = comment (the AI decides like, dislike or want)."""
     out = []
-    for q, a in _answers(answers).items():
+    for q, a in _leaf_answers(answers):
         text = (", ".join(map(str, a)) if isinstance(a, list) else str(a if a is not None else "")).strip()
         ql = q.strip().lower()
         if (not text or ql in NAME_KEYS or any(k in ql for k in NOT_FEEDBACK)
@@ -81,7 +92,7 @@ def _known_terms() -> list[tuple[str, str]]:
 
 
 def _respondent_name(answers) -> str:
-    for q, a in _answers(answers).items():
+    for q, a in _leaf_answers(answers):
         if q.strip().lower() in NAME_KEYS:
             return ", ".join(a) if isinstance(a, list) else str(a or "")
     return ""
@@ -101,7 +112,8 @@ def pending(c: psycopg.Connection, done: dict, limit: int = 50) -> list[dict]:
     rows = c.execute("""
         select r.id, r.project_id, r.vendor_id, r.likes, r.dislikes, r.wants, s.answers,
                case when r.analysis_error like %s then r.analysis_error end
-        from responses r left join survey_submissions s on s.id = r.raw_submission_id
+        from responses r join surveys sv on sv.id = r.survey_id and sv.included_in_analysis
+             left join survey_submissions s on s.id = r.raw_submission_id
         where not (r.id = any(%s))
            or (r.analysis_error like %s and r.id || '|' || r.analysis_error <> all(%s))
         order by r.submitted_at limit %s""", (REREAD + "%", list(done), REREAD + "%", handled, limit)).fetchall()
@@ -214,6 +226,7 @@ def link_vendors(c: psycopg.Connection) -> int:
     with c.transaction():
         n = c.execute("""insert into vendor_offerings (vendor_id, feature_id)
             select distinct r.vendor_id, m.feature_id from mentions m join responses r on r.id = m.response_id
+            join surveys s on s.id = r.survey_id and s.included_in_analysis
             where m.kind in ('like', 'dislike') and r.vendor_id is not null
               and not exists (select 1 from vendor_offerings o where o.vendor_id = r.vendor_id and o.feature_id = m.feature_id)
               and not exists (select 1 from vendor_offering_removals x where x.vendor_id = r.vendor_id and x.feature_id = m.feature_id)""").rowcount

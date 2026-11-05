@@ -81,7 +81,7 @@ public sealed class FeatureReadRepository(IConfiguration configuration) : IFeatu
     {
         if (!await ExistsAsync(projectId, featureId, ct)) return null;
         const string sql = """
-                           with matches as (select distinct r.id from responses r join mentions m on m.response_id=r.id where r.project_id=@projectId and m.feature_id=@featureId
+                           with matches as (select distinct r.id from responses r join surveys s on s.id=r.survey_id join mentions m on m.response_id=r.id where r.project_id=@projectId and s.included_in_analysis and m.feature_id=@featureId
                              and (@kind is null or m.kind=@kind) and (@from is null or r.submitted_at>=@from) and (@toExclusive is null or r.submitted_at<@toExclusive) and (@group is null or (r.respondent_group=@group or r.respondent_role=@group)))
                            select r.id,r.survey_id,r.respondent_group,v.id,v.name,r.submitted_at,r.likes,r.dislikes,r.wants,r.analyzed_at,
                              array_agg(m.kind order by m.kind) filter(where m.id is not null) kinds, count(*) over()::int total
@@ -131,7 +131,7 @@ public sealed class FeatureReadRepository(IConfiguration configuration) : IFeatu
     {
         if (!await ExistsAsync(projectId, featureId, ct)) return null;
         const string sql =
-            """with related as (select m2.feature_id,count(distinct m2.response_id)::int shared from mentions m1 join mentions m2 on m2.response_id=m1.response_id and m2.feature_id<>m1.feature_id join responses r on r.id=m1.response_id where r.project_id=@projectId and m1.feature_id=@featureId group by m2.feature_id), coverage as (select f.id,count(vo.vendor_id)::int offers,(select count(*) from vendors where project_id=@projectId)::int vendors from features f left join vendor_offerings vo on vo.feature_id=f.id group by f.id) select f.id,f.name,case when c.offers=0 then 'none' when c.offers=c.vendors then 'all' else 'some' end,r.shared,count(*) over()::int total from related r join features f on f.id=r.feature_id join coverage c on c.id=f.id order by r.shared desc,f.name limit @limit""";
+            """with related as (select m2.feature_id,count(distinct m2.response_id)::int shared from mentions m1 join mentions m2 on m2.response_id=m1.response_id and m2.feature_id<>m1.feature_id join responses r on r.id=m1.response_id join surveys s on s.id=r.survey_id where r.project_id=@projectId and s.included_in_analysis and m1.feature_id=@featureId group by m2.feature_id), coverage as (select f.id,count(vo.vendor_id)::int offers,(select count(*) from vendors where project_id=@projectId)::int vendors from features f left join vendor_offerings vo on vo.feature_id=f.id group by f.id) select f.id,f.name,case when c.offers=0 then 'none' when c.offers=c.vendors then 'all' else 'some' end,r.shared,count(*) over()::int total from related r join features f on f.id=r.feature_id join coverage c on c.id=f.id order by r.shared desc,f.name limit @limit""";
         await using var c = await OpenAsync(ct);
         await using var cmd = new NpgsqlCommand(sql, c);
         cmd.Parameters.AddWithValue("projectId", projectId);

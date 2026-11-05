@@ -47,7 +47,7 @@ public sealed class ResponseRepository(IConfiguration configuration) : IResponse
             new StatusCountsDto(Get(statuses, "analyzed"), Get(statuses, "pending"))));
     }
 
-    public async Task<ResponseDetailDto?> GetAsync(string projectId, string responseId, CancellationToken cancellationToken)
+    public async Task<ResponseDetailDto?> GetAsync(string projectId, string responseId, bool includeExcluded, CancellationToken cancellationToken)
     {
         await using var connection = await OpenAsync(cancellationToken);
         if (!await ProjectExistsAsync(connection, projectId, cancellationToken)) return null;
@@ -56,10 +56,11 @@ public sealed class ResponseRepository(IConfiguration configuration) : IResponse
                    r.analyzed_at is not null, s.id, s.name, coalesce(r.analysis_error like 'reread:%', false), sub.answers::text
             from responses r join vendors v on v.id = r.vendor_id join surveys s on s.id = r.survey_id
             left join survey_submissions sub on sub.id = r.raw_submission_id
-            where r.project_id = @projectId and r.id = @responseId;
+            where r.project_id = @projectId and r.id = @responseId
+              and (@includeExcluded or s.included_in_analysis);
             """;
         await using var command = new NpgsqlCommand(sql, connection);
-        command.Parameters.AddWithValue("projectId", projectId); command.Parameters.AddWithValue("responseId", responseId);
+        command.Parameters.AddWithValue("projectId", projectId); command.Parameters.AddWithValue("responseId", responseId); command.Parameters.AddWithValue("includeExcluded", includeExcluded);
         await using var reader = await command.ExecuteReaderAsync(cancellationToken);
         if (!await reader.ReadAsync(cancellationToken)) return null;
         var id = reader.GetString(0);
@@ -104,6 +105,7 @@ public sealed class ResponseRepository(IConfiguration configuration) : IResponse
     private static WhereClause BuildWhere(ResponseListQuery q, bool includeGroup, bool includeStatus)
     {
         var clauses = new List<string> { "where r.project_id = @projectId" };
+        if (!q.IncludeExcluded) clauses.Add("exists(select 1 from surveys s where s.id=r.survey_id and s.included_in_analysis)");
         if (!string.IsNullOrWhiteSpace(q.VendorId)) clauses.Add("r.vendor_id = @vendorId");
         if (!string.IsNullOrWhiteSpace(q.SurveyId)) clauses.Add("r.survey_id = @surveyId");
         if (includeStatus && !string.IsNullOrWhiteSpace(q.Status)) clauses.Add(q.Status == "analyzed" ? "r.analyzed_at is not null" : "r.analyzed_at is null");

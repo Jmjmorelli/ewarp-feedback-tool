@@ -12,14 +12,16 @@ public sealed class ResponsesController(IResponseRepository responses) : Control
     public async Task<IActionResult> List(string projectId, [FromQuery] ResponseListQuery query, CancellationToken cancellationToken)
     {
         var error = Validate(query); if (error is not null) return BadRequest(Error(error));
+        if (query.IncludeExcluded && !User.IsInRole(Roles.Admin)) return Forbid();
         var result = await responses.ListAsync(projectId, query, cancellationToken);
         return result is null ? NotFound(NotFoundError("Project was not found.")) : Ok(result);
     }
 
     [HttpGet("{responseId}")]
-    public async Task<IActionResult> Get(string projectId, string responseId, CancellationToken cancellationToken)
+    public async Task<IActionResult> Get(string projectId, string responseId, bool includeExcluded, CancellationToken cancellationToken)
     {
-        var result = await responses.GetAsync(projectId, responseId, cancellationToken);
+        if (includeExcluded && !User.IsInRole(Roles.Admin)) return Forbid();
+        var result = await responses.GetAsync(projectId, responseId, includeExcluded, cancellationToken);
         return result is null ? NotFound(NotFoundError("Project or response was not found.")) : Ok(result);
     }
 

@@ -101,7 +101,27 @@ public sealed class VendorWriteRepository(IConfiguration configuration, IVendorR
     private static async Task<bool> FormExistsAsync(NpgsqlConnection c, string form, string? excluding, CancellationToken ct) => (bool)(await ScalarAsync(c, "select exists(select 1 from form_configurations where lower(regexp_replace(btrim(form),'\\s+',' ','g'))=lower(@form) and (@excluding='' or vendor_id<>@excluding))", ct, ("form", form), ("excluding", excluding ?? string.Empty)) ?? false);
     private static async Task<bool> FeatureExistsAsync(NpgsqlConnection c, string projectId, string featureId, CancellationToken ct) => (bool)(await ScalarAsync(c, "select exists(select 1 from features where project_id=@projectId and id=@featureId)", ct, ("projectId", projectId), ("featureId", featureId)) ?? false);
     private static async Task<(string Name, string? SurveyId)?> VendorAsync(NpgsqlConnection c, string projectId, string vendorId, CancellationToken ct) { await using var cmd = Command(c, "select v.name,(select fc.survey_id from form_configurations fc where fc.vendor_id=v.id limit 1) from vendors v where v.project_id=@projectId and v.id=@vendorId", ("projectId", projectId), ("vendorId", vendorId)); await using var r = await cmd.ExecuteReaderAsync(ct); return await r.ReadAsync(ct) ? (r.GetString(0), r.IsDBNull(1) ? null : r.GetString(1)) : null; }
-    private static async Task ImportSubmissionsAsync(NpgsqlConnection c, NpgsqlTransaction tx, string projectId, string surveyId, string vendorId, string form, CancellationToken ct) => await ExecuteAsync(c, tx, """with imported as (insert into responses (id,raw_submission_id,project_id,survey_id,vendor_id,respondent_group,likes,dislikes,wants,submitted_at) select 'rsp_' || ss.id,ss.id,@projectId,@surveyId,@vendorId,'other',coalesce((select value from jsonb_each_text(ss.answers) answer where lower(answer.key) like 'what do you like about%' limit 1),''),coalesce((select value from jsonb_each_text(ss.answers) answer where lower(answer.key) like 'what don''t you like about%' limit 1),''),coalesce((select value from jsonb_each_text(ss.answers) answer where lower(answer.key) like 'what additions would%' limit 1),''),ss.submitted_at from survey_submissions ss where lower(regexp_replace(btrim(ss.form),'\s+',' ','g'))=lower(@form) and not exists(select 1 from responses r where r.raw_submission_id=ss.id) returning id,submitted_at) insert into activity_events (id,project_id,type,occurred_at,response_id) select 'evt_submitted_' || substring(id from 5),@projectId,'response.submitted',submitted_at,id from imported""", ct, ("projectId", projectId), ("surveyId", surveyId), ("vendorId", vendorId), ("form", form));
+    private static async Task ImportSubmissionsAsync(NpgsqlConnection c, NpgsqlTransaction tx, string projectId, string surveyId, string vendorId, string form, CancellationToken ct) => await ExecuteAsync(c, tx, """
+        with recursive source_submissions as (
+          select ss.id,ss.answers,ss.submitted_at from survey_submissions ss
+          where lower(regexp_replace(btrim(ss.form),'\s+',' ','g'))=lower(@form)
+            and not exists(select 1 from responses r where r.raw_submission_id=ss.id)
+        ), answer_values(raw_submission_id,question,value) as (
+          select ss.id,a.key,a.value from source_submissions ss
+          cross join lateral jsonb_each(case when jsonb_typeof(ss.answers)='object' then ss.answers else '{}'::jsonb end) a
+          union all
+          select av.raw_submission_id,a.key,a.value from answer_values av
+          cross join lateral jsonb_each(av.value) a where jsonb_typeof(av.value)='object'
+        ), imported as (
+          insert into responses (id,raw_submission_id,project_id,survey_id,vendor_id,respondent_group,likes,dislikes,wants,submitted_at)
+          select 'rsp_' || ss.id,ss.id,@projectId,@surveyId,@vendorId,'other',
+            coalesce((select av.value #>> '{}' from answer_values av where av.raw_submission_id=ss.id and lower(av.question) like 'what do you like about%' and jsonb_typeof(av.value)='string' limit 1),''),
+            coalesce((select av.value #>> '{}' from answer_values av where av.raw_submission_id=ss.id and lower(av.question) like 'what don''t you like about%' and jsonb_typeof(av.value)='string' limit 1),''),
+            coalesce((select av.value #>> '{}' from answer_values av where av.raw_submission_id=ss.id and (lower(av.question) like 'what additions would%' or lower(av.question) like '%would you like%') and jsonb_typeof(av.value)='string' limit 1),''),
+            ss.submitted_at from source_submissions ss returning id,submitted_at
+        ) insert into activity_events (id,project_id,type,occurred_at,response_id)
+        select 'evt_submitted_' || substring(id from 5),@projectId,'response.submitted',submitted_at,id from imported
+        """, ct, ("projectId", projectId), ("surveyId", surveyId), ("vendorId", vendorId), ("form", form));
     private static async Task LockAsync(NpgsqlConnection c, NpgsqlTransaction tx, string key, CancellationToken ct) => await ExecuteAsync(c, tx, "select pg_advisory_xact_lock(hashtext(@key))", ct, ("key", key));
     private static async Task<int> ScalarIntAsync(NpgsqlConnection c, string sql, CancellationToken ct, params (string, object?)[] values) => Convert.ToInt32(await ScalarAsync(c, sql, ct, values));
     private static async Task<object?> ScalarAsync(NpgsqlConnection c, string sql, CancellationToken ct, params (string, object?)[] values) { await using var cmd = Command(c, sql, values); return await cmd.ExecuteScalarAsync(ct); }

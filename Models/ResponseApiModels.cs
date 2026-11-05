@@ -56,4 +56,5 @@ public sealed class ResponseListQuery
     public DateOnly? From { get; init; }
     public DateOnly? To { get; init; }
     public string? Group { get; init; }
+    public bool IncludeExcluded { get; init; }
 }

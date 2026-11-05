@@ -53,6 +53,7 @@ public sealed class SurveySubmissionRepository(IConfiguration configuration) : I
         var likes = SurveyAnswerExtractor.ValueStartingWith(submission.Answers, SurveyAnswerExtractor.LikesPrefix);
         var dislikes = SurveyAnswerExtractor.ValueStartingWith(submission.Answers, SurveyAnswerExtractor.DislikesPrefix);
         var wants = SurveyAnswerExtractor.ValueStartingWith(submission.Answers, SurveyAnswerExtractor.WantsPrefix);
+        if (string.IsNullOrEmpty(wants)) wants = SurveyAnswerExtractor.ValueContaining(submission.Answers, "would you like");
         var responseId = "rsp_" + submission.Id;
 
         await using var responseCommand = new NpgsqlCommand("""

@@ -37,6 +37,15 @@ def _plain(a):
     return "" if a is None else a
 
 
+def _leaf_answers(answers: dict):
+    """Yield question/value pairs from either flat or sectioned Google Form answers."""
+    for question, value in answers.items():
+        if isinstance(value, dict):
+            yield from _leaf_answers(value)
+        else:
+            yield question, value
+
+
 def _title_words() -> dict:
     """forms.local.json ({"vendor1": ["word in the title"], ...}), never committed, since titles hold vendor names."""
     local = HERE / "forms.local.json"
@@ -50,7 +59,7 @@ def vendor_for(form: str, vendor_by_form: dict, answers: dict | None = None) -> 
     if form in vendor_by_form:
         return vendor_by_form[form]
     words = _title_words()
-    picked = [_plain(a) for q, a in (answers or {}).items() if "platform" in q.lower() and "answering" in q.lower()]
+    picked = [_plain(a) for q, a in _leaf_answers(answers or {}) if "platform" in q.lower() and "answering" in q.lower()]
     for text in picked + [form]:
         for key, ws in words.items():
             if any(w.lower() in text.lower() for w in ws) and key in vendor_by_form:
@@ -74,7 +83,7 @@ def normalize(sub: dict, vendor_by_form: dict, idx: int) -> dict:
     submitted = sub.get("submittedAt") or _plain(answers.get("Timestamp", ""))
     r = {"id": str(sub.get("id") or f"r{idx:02d}"), "vendorId": vendor_for(sub["form"], vendor_by_form, answers), "submittedAt": submitted,
          "name": "", "role": "", "likes": "", "dislikes": "", "wants": "", "comments": "", "ratings": {}}
-    for q, a in answers.items():
+    for q, a in _leaf_answers(answers):
         a = _plain(a)
         ql = q.lower().replace("’", "'")  # Google Forms may use a curly apostrophe
         if ql in ("name", "full name", "your name"):
@@ -85,7 +94,7 @@ def normalize(sub: dict, vendor_by_form: dict, idx: int) -> dict:
             r["dislikes"] = a
         elif "do you like" in ql:
             r["likes"] = a
-        elif "additions" in ql:
+        elif "additions" in ql or "would you like" in ql:
             r["wants"] = a
         elif "additional comments" in ql:
             r["comments"] = a

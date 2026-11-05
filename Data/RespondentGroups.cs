@@ -33,11 +33,10 @@ public static class RespondentGroups
 
     public static string FromAnswers(JsonElement answers)
     {
-        if (answers.ValueKind != JsonValueKind.Object)
-            return Other;
-        foreach (var answer in answers.EnumerateObject())
+        foreach (var answer in SurveyAnswerExtractor.EnumerateLeafAnswers(answers))
         {
-            if (!answer.Name.Contains("your role", StringComparison.OrdinalIgnoreCase))
+            if (!answer.Question.Contains("your role", StringComparison.OrdinalIgnoreCase)
+                && !answer.Question.Contains("primary role", StringComparison.OrdinalIgnoreCase))
                 continue;
             // a multi-select role comes in as a list: the first role picked is the group
             var value = answer.Value.ValueKind switch

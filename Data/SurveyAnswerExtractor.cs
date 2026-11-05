@@ -3,6 +3,8 @@ using FeedbackTool.Models;
 
 namespace FeedbackTool.Data;
 
+public sealed record SurveyAnswer(string Question, JsonElement Value);
+
 public static class SurveyAnswerExtractor
 {
     public const string LikesPrefix = "What do you like about";
@@ -11,11 +13,17 @@ public static class SurveyAnswerExtractor
 
     public static string ValueStartingWith(JsonElement answers, string prefix)
     {
-        if (answers.ValueKind != JsonValueKind.Object)
-            return string.Empty;
+        foreach (var answer in EnumerateLeafAnswers(answers))
+            if (answer.Question.StartsWith(prefix, StringComparison.OrdinalIgnoreCase) && answer.Value.ValueKind == JsonValueKind.String)
+                return answer.Value.GetString() ?? string.Empty;
 
-        foreach (var answer in answers.EnumerateObject())
-            if (answer.Name.StartsWith(prefix, StringComparison.OrdinalIgnoreCase) && answer.Value.ValueKind == JsonValueKind.String)
+        return string.Empty;
+    }
+
+    public static string ValueContaining(JsonElement answers, string text)
+    {
+        foreach (var answer in EnumerateLeafAnswers(answers))
+            if (answer.Question.Contains(text, StringComparison.OrdinalIgnoreCase) && answer.Value.ValueKind == JsonValueKind.String)
                 return answer.Value.GetString() ?? string.Empty;
 
         return string.Empty;
@@ -48,5 +56,29 @@ public static class SurveyAnswerExtractor
             if (!string.IsNullOrWhiteSpace(text)) list.Add(new(question, text.Trim()));
         }
         return list;
+    }
+
+    // Google Forms can group questions by section. Sections are containers, while strings, numbers, and arrays are answers.
+    public static IEnumerable<SurveyAnswer> EnumerateLeafAnswers(JsonElement answers)
+    {
+        if (answers.ValueKind != JsonValueKind.Object)
+            yield break;
+
+        foreach (var answer in answers.EnumerateObject())
+            foreach (var leaf in Enumerate(answer.Name, answer.Value))
+                yield return leaf;
+    }
+
+    private static IEnumerable<SurveyAnswer> Enumerate(string question, JsonElement value)
+    {
+        if (value.ValueKind != JsonValueKind.Object)
+        {
+            yield return new SurveyAnswer(question, value);
+            yield break;
+        }
+
+        foreach (var child in value.EnumerateObject())
+            foreach (var leaf in Enumerate(child.Name, child.Value))
+                yield return leaf;
     }
 }

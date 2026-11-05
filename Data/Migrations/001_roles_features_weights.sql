@@ -1,4 +1,5 @@
 -- Users and roles, manual features and feedback, feature and group weights.
+-- The feedback_mentions view below is replaced by Migrations/002 (it leaves out excluded surveys); run 002 after this.
 -- Run once as the database owner before deploying the code that uses it (the app's user can't create tables):
 --     psql "$OWNER_DATABASE_URL" -v app_user=<the app's database user> -f Data/Migrations/001_roles_features_weights.sql
 -- Safe to run again: every statement checks before it creates.

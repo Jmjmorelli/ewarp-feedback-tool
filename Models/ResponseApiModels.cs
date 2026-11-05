@@ -6,6 +6,9 @@ public sealed record ResponseMentionDto(NamedReference Feature, string Kind);
 
 public sealed record ResponseMentionDetailDto(NamedReference Feature, string Kind, string Coverage);
 
+// One written answer from the survey that isn't in likes / dislikes / wants (e.g. "If you rated X low, why?").
+public sealed record ResponseAnswerDto(string Question, string Answer);
+
 public sealed record ResponseItemDto(
     string Id,
     string SurveyId,
@@ -38,7 +41,8 @@ public sealed record ResponseDetailDto(
     bool Analyzed,
     NamedReference Survey,
     IReadOnlyList<ResponseMentionDetailDto> Mentions,
-    bool RereadQueued = false); // an admin asked the AI to read it again and it hasn't yet
+    bool RereadQueued = false, // an admin asked the AI to read it again and it hasn't yet
+    IReadOnlyList<ResponseAnswerDto>? Answers = null); // the survey's other answers; the classifier reads these too
 
 public sealed class ResponseListQuery
 {

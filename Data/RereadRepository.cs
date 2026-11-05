@@ -28,7 +28,7 @@ public sealed class RereadRepository(IConfiguration configuration)
 
         if (responseIds is not null)
         {
-            await using var check = new NpgsqlCommand("select x from unnest(@ids) x where not exists(select 1 from responses r join surveys s on s.id=r.survey_id where r.id=x and r.project_id=@projectId and s.included_in_analysis) limit 1", c);
+            await using var check = new NpgsqlCommand("select x from unnest(@ids) x where not exists(select 1 from responses r where r.id=x and r.project_id=@projectId and r.included_in_analysis) limit 1", c);
             check.Parameters.AddWithValue("ids", responseIds.ToArray());
             check.Parameters.AddWithValue("projectId", projectId);
             if (await check.ExecuteScalarAsync(ct) is string unknown) return (0, unknown);
@@ -37,7 +37,7 @@ public sealed class RereadRepository(IConfiguration configuration)
         const string sql = """
             update responses r set analysis_error = @marker || to_char(clock_timestamp() at time zone 'utc', 'YYYY-MM-DD"T"HH24:MI:SS.US"Z"')
             where r.project_id=@projectId
-              and exists(select 1 from surveys s where s.id=r.survey_id and s.included_in_analysis)
+              and r.included_in_analysis
               and coalesce(r.analysis_error, '') not like 'reread:%'
               and (case when @all then not exists(select 1 from mentions m where m.response_id=r.id) else r.id = any(@ids) end);
             """;

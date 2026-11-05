@@ -112,10 +112,11 @@ def pending(c: psycopg.Connection, done: dict, limit: int = 50) -> list[dict]:
     rows = c.execute("""
         select r.id, r.project_id, r.vendor_id, r.likes, r.dislikes, r.wants, s.answers,
                case when r.analysis_error like %s then r.analysis_error end
-        from responses r join surveys sv on sv.id = r.survey_id and sv.included_in_analysis
-             left join survey_submissions s on s.id = r.raw_submission_id
-        where not (r.id = any(%s))
+        from responses r left join survey_submissions s on s.id = r.raw_submission_id
+        where r.included_in_analysis and (
+          not (r.id = any(%s))
            or (r.analysis_error like %s and r.id || '|' || r.analysis_error <> all(%s))
+        )
         order by r.submitted_at limit %s""", (REREAD + "%", list(done), REREAD + "%", handled, limit)).fetchall()
     keys = ("id", "project_id", "vendor_id", "likes", "dislikes", "wants", "answers", "reread")
     out = [dict(zip(keys, r)) for r in rows]
@@ -226,8 +227,7 @@ def link_vendors(c: psycopg.Connection) -> int:
     with c.transaction():
         n = c.execute("""insert into vendor_offerings (vendor_id, feature_id)
             select distinct r.vendor_id, m.feature_id from mentions m join responses r on r.id = m.response_id
-            join surveys s on s.id = r.survey_id and s.included_in_analysis
-            where m.kind in ('like', 'dislike') and r.vendor_id is not null
+            where m.kind in ('like', 'dislike') and r.vendor_id is not null and r.included_in_analysis
               and not exists (select 1 from vendor_offerings o where o.vendor_id = r.vendor_id and o.feature_id = m.feature_id)
               and not exists (select 1 from vendor_offering_removals x where x.vendor_id = r.vendor_id and x.feature_id = m.feature_id)""").rowcount
     if n:

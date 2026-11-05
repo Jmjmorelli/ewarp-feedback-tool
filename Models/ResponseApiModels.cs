@@ -19,7 +19,11 @@ public sealed record ResponseItemDto(
     string Dislikes,
     string Wants,
     bool Analyzed,
-    IReadOnlyList<ResponseMentionDto> Mentions);
+    IReadOnlyList<ResponseMentionDto> Mentions,
+    bool IncludedInAnalysis = true,
+    string? ExclusionReason = null,
+    DateTimeOffset? ExcludedAt = null,
+    NamedReference? ExcludedBy = null);
 
 public sealed record GroupCountsDto(int Pm, int Sponsor, int Other);
 
@@ -42,7 +46,11 @@ public sealed record ResponseDetailDto(
     NamedReference Survey,
     IReadOnlyList<ResponseMentionDetailDto> Mentions,
     bool RereadQueued = false, // an admin asked the AI to read it again and it hasn't yet
-    IReadOnlyList<ResponseAnswerDto>? Answers = null); // the survey's other answers; the classifier reads these too
+    IReadOnlyList<ResponseAnswerDto>? Answers = null, // the survey's other answers; the classifier reads these too
+    bool IncludedInAnalysis = true,
+    string? ExclusionReason = null,
+    DateTimeOffset? ExcludedAt = null,
+    NamedReference? ExcludedBy = null);
 
 public sealed class ResponseListQuery
 {

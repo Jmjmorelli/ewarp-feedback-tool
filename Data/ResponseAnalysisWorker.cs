@@ -22,7 +22,7 @@ public sealed class ResponseAnalysisWorker(IServiceScopeFactory scopes, ILogger<
         var cs = config.GetConnectionString("DefaultConnection");
         if (string.IsNullOrWhiteSpace(cs)) return;
         await using var c = new NpgsqlConnection(cs); await c.OpenAsync(ct);
-        const string select = """select r.id from responses r join surveys s on s.id=r.survey_id where r.analyzed_at is null and s.included_in_analysis order by r.submitted_at limit 1 for update skip locked;""";
+        const string select = """select r.id from responses r where r.analyzed_at is null and r.included_in_analysis order by r.submitted_at limit 1 for update skip locked;""";
         await using var tx = await c.BeginTransactionAsync(ct);
         string? responseId = null;
         await using (var cmd = new NpgsqlCommand(select,c,tx))

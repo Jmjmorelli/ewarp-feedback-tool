@@ -17,8 +17,9 @@ public sealed class ResponseRepository(IConfiguration configuration) : IResponse
         var page = query.Limit is not null ? " limit @limit offset @offset" : query.Offset > 0 ? " offset @offset" : string.Empty;
         var sql = $"""
             select r.id, r.survey_id, r.respondent_group, v.id, v.name, r.submitted_at,
-                   r.likes, r.dislikes, r.wants, r.analyzed_at is not null
-            from responses r join vendors v on v.id = r.vendor_id
+                   r.likes, r.dislikes, r.wants, r.analyzed_at is not null,
+                   r.included_in_analysis,r.exclusion_reason,r.excluded_at,u.id,u.name
+            from responses r join vendors v on v.id = r.vendor_id left join users u on u.id=r.excluded_by_user_id
             {where.Sql}
             order by {order}{page};
             """;
@@ -32,7 +33,10 @@ public sealed class ResponseRepository(IConfiguration configuration) : IResponse
                 var id = reader.GetString(0); ids.Add(id);
                 items.Add(new ResponseItemDto(id, reader.GetString(1), reader.GetString(2),
                     new NamedReference(reader.GetString(3), reader.GetString(4)), reader.GetFieldValue<DateTimeOffset>(5),
-                    reader.GetString(6), reader.GetString(7), reader.GetString(8), reader.GetBoolean(9), Array.Empty<ResponseMentionDto>()));
+                    reader.GetString(6), reader.GetString(7), reader.GetString(8), reader.GetBoolean(9), Array.Empty<ResponseMentionDto>(),
+                    reader.GetBoolean(10), reader.IsDBNull(11) ? null : reader.GetString(11),
+                    reader.IsDBNull(12) ? (DateTimeOffset?)null : reader.GetFieldValue<DateTimeOffset>(12),
+                    reader.IsDBNull(13) ? null : new NamedReference(reader.GetString(13), reader.GetString(14))));
             }
         }
         var mentions = await GetMentionsAsync(connection, ids, cancellationToken);
@@ -53,11 +57,13 @@ public sealed class ResponseRepository(IConfiguration configuration) : IResponse
         if (!await ProjectExistsAsync(connection, projectId, cancellationToken)) return null;
         const string sql = """
             select r.id, r.survey_id, r.respondent_group, v.id, v.name, r.submitted_at, r.likes, r.dislikes, r.wants,
-                   r.analyzed_at is not null, s.id, s.name, coalesce(r.analysis_error like 'reread:%', false), sub.answers::text
+                   r.analyzed_at is not null, s.id, s.name, coalesce(r.analysis_error like 'reread:%', false), sub.answers::text,
+                   r.included_in_analysis,r.exclusion_reason,r.excluded_at,u.id,u.name
             from responses r join vendors v on v.id = r.vendor_id join surveys s on s.id = r.survey_id
             left join survey_submissions sub on sub.id = r.raw_submission_id
+            left join users u on u.id=r.excluded_by_user_id
             where r.project_id = @projectId and r.id = @responseId
-              and (@includeExcluded or s.included_in_analysis);
+              and (@includeExcluded or r.included_in_analysis);
             """;
         await using var command = new NpgsqlCommand(sql, connection);
         command.Parameters.AddWithValue("projectId", projectId); command.Parameters.AddWithValue("responseId", responseId); command.Parameters.AddWithValue("includeExcluded", includeExcluded);
@@ -67,7 +73,9 @@ public sealed class ResponseRepository(IConfiguration configuration) : IResponse
         var result = new ResponseDetailDto(id, reader.GetString(1), reader.GetString(2), new NamedReference(reader.GetString(3), reader.GetString(4)),
             reader.GetFieldValue<DateTimeOffset>(5), reader.GetString(6), reader.GetString(7), reader.GetString(8), reader.GetBoolean(9),
             new NamedReference(reader.GetString(10), reader.GetString(11)), Array.Empty<ResponseMentionDetailDto>(), reader.GetBoolean(12),
-            reader.IsDBNull(13) ? [] : SurveyAnswerExtractor.OtherAnswers(reader.GetString(13)));
+            reader.IsDBNull(13) ? [] : SurveyAnswerExtractor.OtherAnswers(reader.GetString(13)), reader.GetBoolean(14),
+            reader.IsDBNull(15) ? null : reader.GetString(15), reader.IsDBNull(16) ? (DateTimeOffset?)null : reader.GetFieldValue<DateTimeOffset>(16),
+            reader.IsDBNull(17) ? null : new NamedReference(reader.GetString(17), reader.GetString(18)));
         await reader.CloseAsync();
         const string mentionsSql = """
             select f.id, f.name, m.kind,
@@ -105,7 +113,7 @@ public sealed class ResponseRepository(IConfiguration configuration) : IResponse
     private static WhereClause BuildWhere(ResponseListQuery q, bool includeGroup, bool includeStatus)
     {
         var clauses = new List<string> { "where r.project_id = @projectId" };
-        if (!q.IncludeExcluded) clauses.Add("exists(select 1 from surveys s where s.id=r.survey_id and s.included_in_analysis)");
+        if (!q.IncludeExcluded) clauses.Add("r.included_in_analysis");
         if (!string.IsNullOrWhiteSpace(q.VendorId)) clauses.Add("r.vendor_id = @vendorId");
         if (!string.IsNullOrWhiteSpace(q.SurveyId)) clauses.Add("r.survey_id = @surveyId");
         if (includeStatus && !string.IsNullOrWhiteSpace(q.Status)) clauses.Add(q.Status == "analyzed" ? "r.analyzed_at is not null" : "r.analyzed_at is null");

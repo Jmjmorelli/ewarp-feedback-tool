@@ -12,8 +12,7 @@ public sealed class ProjectReadRepository(IConfiguration configuration)
     {
         const string sql = """
             select p.id, p.name, count(r.id)::int, max(r.submitted_at)
-            from projects p left join responses r on r.project_id = p.id
-              and exists(select 1 from surveys s where s.id=r.survey_id and s.included_in_analysis)
+            from projects p left join responses r on r.project_id = p.id and r.included_in_analysis
             group by p.id, p.name order by p.name;
             """;
         var results = new List<object>();
@@ -34,8 +33,7 @@ public sealed class ProjectReadRepository(IConfiguration configuration)
               (select count(*)::int from vendors where project_id = p.id),
               count(r.id)::int,
               (select count(*)::int from surveys where project_id = p.id)
-            from projects p left join responses r on r.project_id = p.id
-              and exists(select 1 from surveys s where s.id=r.survey_id and s.included_in_analysis)
+            from projects p left join responses r on r.project_id = p.id and r.included_in_analysis
             where p.id = @id group by p.id, p.name, p.description, p.created_at;
             """;
         await using var connection = new NpgsqlConnection(ConnectionString);
@@ -51,7 +49,7 @@ public sealed class ProjectReadRepository(IConfiguration configuration)
     {
         if (!await ExistsAsync(projectId, ct)) return null;
         const string sql = """
-            with filtered as (select r.* from responses r join surveys s on s.id=r.survey_id where r.project_id=@id and s.included_in_analysis and (@from is null or r.submitted_at >= @from) and (@to is null or r.submitted_at < @to + interval '1 day') and (@group is null or (r.respondent_group=@group or r.respondent_role=@group))),
+            with filtered as (select r.* from responses r where r.project_id=@id and r.included_in_analysis and (@from is null or r.submitted_at >= @from) and (@to is null or r.submitted_at < @to + interval '1 day') and (@group is null or (r.respondent_group=@group or r.respondent_role=@group))),
             fm as (select x.* from feedback_mentions x where x.project_id=@id and (@from is null or x.occurred_at >= @from) and (@to is null or x.occurred_at < @to + interval '1 day') and (@group is null or (x.respondent_group=@group or x.respondent_role=@group)))
             select (select count(*)::int from filtered),
               (select count(*)::int from filtered where submitted_at >= now() - interval '7 days'),

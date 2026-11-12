@@ -9,6 +9,12 @@ public sealed record ResponseMentionDetailDto(NamedReference Feature, string Kin
 // One written answer from the survey that isn't in likes / dislikes / wants (e.g. "If you rated X low, why?").
 public sealed record ResponseAnswerDto(string Question, string Answer);
 
+// The whole survey as the respondent filled it in, by form section (e.g. one per role they picked).
+// Title is null for questions outside any section. Values: one per choice picked; a rating is its number as text.
+public sealed record ResponseAnswerSectionDto(string? Title, IReadOnlyList<ResponseSurveyAnswerDto> Answers);
+
+public sealed record ResponseSurveyAnswerDto(string Question, IReadOnlyList<string> Values);
+
 public sealed record ResponseItemDto(
     string Id,
     string SurveyId,
@@ -50,7 +56,8 @@ public sealed record ResponseDetailDto(
     bool IncludedInAnalysis = true,
     string? ExclusionReason = null,
     DateTimeOffset? ExcludedAt = null,
-    NamedReference? ExcludedBy = null);
+    NamedReference? ExcludedBy = null,
+    IReadOnlyList<ResponseAnswerSectionDto>? Sections = null); // every answer, by section, for the response page
 
 public sealed class ResponseListQuery
 {

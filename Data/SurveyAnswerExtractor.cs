@@ -58,6 +58,60 @@ public static class SurveyAnswerExtractor
         return list;
     }
 
+    // Every answer, grouped the way the form groups them: a nested object is a section (e.g. one per role the
+    // respondent picked), and a section inside a section becomes "Outer › Inner". Questions outside any section go
+    // in an untitled one. Leaves out names, contact details, the timestamp, blanks, and any answer that is exactly
+    // one of `shown` (the likes / dislikes / wants the page already shows).
+    public static IReadOnlyList<ResponseAnswerSectionDto> Sections(string answersJson, params string[] shown)
+    {
+        using var doc = JsonDocument.Parse(answersJson);
+        if (doc.RootElement.ValueKind != JsonValueKind.Object) return [];
+        var skip = shown.Select(s => s.Trim()).Where(s => s.Length > 0).ToHashSet(StringComparer.Ordinal);
+        var sections = new List<ResponseAnswerSectionDto>();
+        AddSection(sections, null, doc.RootElement, skip);
+        return sections;
+    }
+
+    private static void AddSection(List<ResponseAnswerSectionDto> sections, string? title, JsonElement section, HashSet<string> skip)
+    {
+        List<ResponseSurveyAnswerDto>? answers = null; // added on its first answer, so empty sections never show
+        foreach (var item in section.EnumerateObject())
+        {
+            if (item.Value.ValueKind == JsonValueKind.Object)
+            {
+                var name = item.Name.Trim();
+                AddSection(sections, title is null ? name : $"{title} › {name}", item.Value, skip);
+                answers = null; // questions after a subsection start a new block, keeping the form's order
+                continue;
+            }
+            if (Answer(item.Name, item.Value, skip) is not { } answer) continue;
+            if (answers is null) { answers = []; sections.Add(new(title, answers)); }
+            answers.Add(answer);
+        }
+    }
+
+    private static ResponseSurveyAnswerDto? Answer(string name, JsonElement value, HashSet<string> skip)
+    {
+        var question = name.Trim();
+        var q = question.ToLowerInvariant();
+        if (q == "timestamp" || NameQuestions.Contains(q) || ContactWords.Any(q.Contains)) return null;
+        var items = value.ValueKind == JsonValueKind.Array ? value.EnumerateArray().ToList() : new List<JsonElement> { value };
+        var values = items.Select(Text).Where(t => t.Length > 0).ToList();
+        if (values.Count == 0) return null;
+        if (values.Count == 1 && skip.Contains(values[0])) return null;
+        return new(question, values);
+    }
+
+    private static string Text(JsonElement v) => v.ValueKind switch
+    {
+        JsonValueKind.String => v.GetString()?.Trim() ?? "",
+        JsonValueKind.Number => v.GetRawText(),
+        JsonValueKind.True => "Yes",
+        JsonValueKind.False => "No",
+        JsonValueKind.Array => string.Join(", ", v.EnumerateArray().Select(Text).Where(t => t.Length > 0)),
+        _ => "",
+    };
+
     // Google Forms can group questions by section. Sections are containers, while strings, numbers, and arrays are answers.
     public static IEnumerable<SurveyAnswer> EnumerateLeafAnswers(JsonElement answers)
     {

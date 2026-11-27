@@ -9,15 +9,25 @@ public static class SurveyAnswerExtractor
 {
     public const string LikesPrefix = "What do you like about";
     public const string DislikesPrefix = "What don't you like about";
+    // Both live forms (GovSignals, Belisar (Pryzm)) ask "What do you dislike about the platform?", so the old prefix alone
+    // saved an empty dislikes column for every response (fixed 2026-11-27, Refs DIU-64).
+    public const string DislikesAltPrefix = "What do you dislike about";
     public const string WantsPrefix = "What additions would";
 
-    public static string ValueStartingWith(JsonElement answers, string prefix)
+    // Every non-blank answer whose question starts with one of the prefixes, joined with a blank line. A respondent who
+    // picks two roles gets the likes/dislikes/additions questions once per role section; keeping only the first one
+    // dropped the second role's answer (fixed 2026-11-27).
+    public static string ValueStartingWith(JsonElement answers, params string[] prefixes)
     {
+        var values = new List<string>();
         foreach (var answer in EnumerateLeafAnswers(answers))
-            if (answer.Question.StartsWith(prefix, StringComparison.OrdinalIgnoreCase) && answer.Value.ValueKind == JsonValueKind.String)
-                return answer.Value.GetString() ?? string.Empty;
+            if (answer.Value.ValueKind == JsonValueKind.String
+                && prefixes.Any(p => answer.Question.StartsWith(p, StringComparison.OrdinalIgnoreCase))
+                && answer.Value.GetString() is { } text && !string.IsNullOrWhiteSpace(text)
+                && !values.Contains(text.Trim()))
+                values.Add(text.Trim());
 
-        return string.Empty;
+        return string.Join("\n\n", values);
     }
 
     public static string ValueContaining(JsonElement answers, string text)
@@ -45,7 +55,7 @@ public static class SurveyAnswerExtractor
             var question = answer.Name.Trim();
             var q = question.ToLowerInvariant();
             if (NameQuestions.Contains(q) || ContactWords.Any(q.Contains)) continue;
-            if (new[] { LikesPrefix, DislikesPrefix, WantsPrefix }.Any(p => question.StartsWith(p, StringComparison.OrdinalIgnoreCase))) continue;
+            if (new[] { LikesPrefix, DislikesPrefix, DislikesAltPrefix, WantsPrefix }.Any(p => question.StartsWith(p, StringComparison.OrdinalIgnoreCase))) continue;
             var text = answer.Value.ValueKind switch
             {
                 JsonValueKind.String => answer.Value.GetString() ?? "",
@@ -66,7 +76,7 @@ public static class SurveyAnswerExtractor
     {
         using var doc = JsonDocument.Parse(answersJson);
         if (doc.RootElement.ValueKind != JsonValueKind.Object) return [];
-        var skip = shown.Select(s => s.Trim()).Where(s => s.Length > 0).ToHashSet(StringComparer.Ordinal);
+        var skip = shown.SelectMany(s => s.Split("\n\n")).Select(s => s.Trim()).Where(s => s.Length > 0).ToHashSet(StringComparer.Ordinal);
         var sections = new List<ResponseAnswerSectionDto>();
         AddSection(sections, null, doc.RootElement, skip);
         return sections;

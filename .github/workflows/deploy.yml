@@ -133,6 +133,10 @@ jobs:
           [Install]
           WantedBy=multi-user.target
           UNIT
+            # What the old process said before this restart: failed passes, leak-check stops, crashes (2026-11-27: it wrote
+            # no mentions after 11-05 and nobody could see why without SSH).
+            echo "--- classifier errors since the last deploy:"
+            sudo journalctl --no-pager --unit ewarp-classifier --since "-21 days" | grep -E "pass failed|STOPPED|Traceback|Error|error" | tail -n 30 || true
             sudo systemctl daemon-reload
             sudo systemctl enable --quiet ewarp-classifier
             sudo systemctl restart ewarp-classifier
@@ -140,5 +144,7 @@ jobs:
               sleep 1
               sudo systemctl is-active --quiet ewarp-classifier || { echo "classifier did not stay up"; exit 1; }
             done
-            sudo journalctl --no-pager --unit ewarp-classifier --lines 5
+            sleep 40  # let the first pass finish, so a failure shows up in this log
+            echo "--- classifier after restart:"
+            sudo journalctl --no-pager --unit ewarp-classifier --since "-2 min" | tail -n 30
           REMOTE_COMMANDS

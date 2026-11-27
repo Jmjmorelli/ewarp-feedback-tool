@@ -81,24 +81,25 @@ jobs:
             sudo systemctl --no-pager --full status "$VPS_SERVICE_NAME"
           REMOTE_COMMANDS
 
-      # Survey feature finder (classifier/README.md). AI = Gemini 3.5 Flash-Lite on the owner's Google AI key (owner 2026-11-27;
-      # Experiential/DeepSeek dropped: 403 on every pass since 11-05). No CLASSIFIER_GEMINI_KEY secret = the classifier is stopped.
+      # Survey feature finder (classifier/README.md). AI = DeepSeek V4.1 Flash via Experiential, no-training providers only
+      # (owner 2026-11-27; Gemini removed). No CLASSIFIER_EXPERIENTIAL_KEY secret = the classifier is stopped and its key file wiped.
       - name: Classifier service
         env:
           VPS_HOST: ${{ secrets.VPS_HOST }}
           VPS_USER: ${{ secrets.VPS_USER }}
           VPS_APP_DIR: ${{ secrets.VPS_APP_DIR }}
-          CLASSIFIER_GEMINI_KEY: ${{ secrets.CLASSIFIER_GEMINI_KEY }}
+          CLASSIFIER_EXPERIENTIAL_KEY: ${{ secrets.CLASSIFIER_EXPERIENTIAL_KEY }}
           CLASSIFIER_DATABASE_URL: ${{ secrets.CLASSIFIER_DATABASE_URL }}
           CLASSIFIER_SENSITIVE_TERMS: ${{ secrets.CLASSIFIER_SENSITIVE_TERMS }}
         run: |
-          if [ -z "$CLASSIFIER_GEMINI_KEY" ] || [ -z "$CLASSIFIER_DATABASE_URL" ]; then
-            echo "Classifier secrets not set: stopping the classifier so it calls no AI."
-            ssh "$VPS_USER@$VPS_HOST" 'sudo systemctl disable --now ewarp-classifier 2>/dev/null || true'
+          if [ -z "$CLASSIFIER_EXPERIENTIAL_KEY" ] || [ -z "$CLASSIFIER_DATABASE_URL" ]; then
+            echo "Classifier secrets not set: stopping the classifier and wiping its key file so it calls no AI."
+            ssh "$VPS_USER@$VPS_HOST" 'sudo systemctl disable --now ewarp-classifier 2>/dev/null || true; sudo rm -f /etc/ewarp-classifier/env'
             exit 0
           fi
-          # secrets go straight into root-only files on the server, never into the repo or the log
-          printf 'GEMINI_API_KEY=%s\nDATABASE_URL=%s\n' "$CLASSIFIER_GEMINI_KEY" "$CLASSIFIER_DATABASE_URL" |
+          # secrets go straight into root-only files on the server, never into the repo or the log. The file is rewritten
+          # whole, so a key from an earlier setup (the 2026-11-27 Gemini key) does not survive.
+          printf 'EXPERIENTIAL_API_KEY=%s\nDATABASE_URL=%s\n' "$CLASSIFIER_EXPERIENTIAL_KEY" "$CLASSIFIER_DATABASE_URL" |
             ssh "$VPS_USER@$VPS_HOST" 'sudo install -D -m 600 -o root -g root /dev/stdin /etc/ewarp-classifier/env'
           terms="$CLASSIFIER_SENSITIVE_TERMS"
           [ -n "$terms" ] || terms='{"terms": []}'

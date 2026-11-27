@@ -8,7 +8,7 @@
 Automatic (owner 2026-10-28 "make it automatic", replaces the one-run rule of 2026-10-23), and it runs on
 the team server (owner 2026-10-28 "make everything run through the server they setup") as systemd service
 ewarp-classifier, installed by .github/workflows/deploy.yml.
-AI key: EXPERIENTIAL_API_KEY (DeepSeek V4.1 Flash, owner 2026-11-03; was RightCodes Sonnet),
+AI key: GEMINI_API_KEY (Gemini 3.5 Flash-Lite, owner 2026-11-27; was DeepSeek via Experiential, before that RightCodes Sonnet),
 Secrets live only in the server's env file, never in this public repo:
     CLASSIFIER_STATE_DIR   where the done-list and run logs go (default: ./out next to this file)
     SENSITIVE_TERMS_FILE   real names to hide (default: sensitive_terms.json, else the example)
@@ -114,7 +114,8 @@ def pending(c: psycopg.Connection, done: dict, limit: int = 50) -> list[dict]:
                case when r.analysis_error like %s then r.analysis_error end
         from responses r left join survey_submissions s on s.id = r.raw_submission_id
         where r.included_in_analysis and (
-          not (r.id = any(%s))
+          -- a response that already has mentions was read (here or by hand, 2026-11-27 backfill): only a reread redoes it
+          (not (r.id = any(%s)) and not exists (select 1 from mentions m where m.response_id = r.id))
            or (r.analysis_error like %s and r.id || '|' || r.analysis_error <> all(%s))
         )
         order by r.submitted_at limit %s""", (REREAD + "%", list(done), REREAD + "%", handled, limit)).fetchall()

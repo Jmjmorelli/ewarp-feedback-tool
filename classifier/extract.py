@@ -6,40 +6,33 @@ out/sent_to_ai.json so anyone can check what left the machine.
 from __future__ import annotations
 
 import json
-import os
 import re
 import time
-import urllib.error
-import urllib.request
 from pathlib import Path
 
-# Gemini Flash-Lite on the owner's paid Google AI key (owner 2026-11-27 "use my Google API key and use a cheap Google
-# model"). Replaces DeepSeek via Experiential: from 2026-11 Experiential answers every request that asks for zero data
-# retention with 403 "part of the Pro plan", so no pass had written a mention since 11-05. Paid-tier Gemini API traffic
-# is not used to train Google's models. Key: env GEMINI_API_KEY. Never commit it.
-MODEL = os.environ.get("CLASSIFIER_MODEL", "gemini-3.5-flash-lite")
-KEY_ENV = "GEMINI_API_KEY"
-URL = "https://generativelanguage.googleapis.com/v1beta/models/{model}:generateContent"
-RETRY_HTTP = {429, 500, 502, 503, 504}
-RESPONSE_SCHEMA = {
-    "type": "OBJECT",
-    "properties": {"mentions": {"type": "ARRAY", "items": {
-        "type": "OBJECT",
-        "properties": {"id": {"type": "STRING"}, "feature": {"type": "STRING"},
-                       "kind": {"type": "STRING", "enum": ["like", "dislike", "want"]}, "quote": {"type": "STRING"}},
-        "required": ["id", "feature", "kind", "quote"]}}},
-    "required": ["mentions"],
-}
+import os
+
+import anthropic
+
+MODEL = os.environ.get("CLASSIFIER_MODEL", "deepseek-v4.1-flash")
+# DeepSeek V4.1 Flash through Experiential (owner 2026-11-03 "use deepseek flash for the ai model as it is free",
+# replaces Sonnet via RightCodes of 10-28). Anthropic-style /v1/messages endpoint.
+# Key: env EXPERIENTIAL_API_KEY. Never commit it.
+BASE_URL = "https://api.experientiallabs.ai"
+KEY_ENV = "EXPERIENTIAL_API_KEY"
+# Only providers that never train on the data may serve the request. It was {"zdr": True}, but from 2026-11 Experiential
+# answers zdr with 403 "part of the Pro plan", so no pass wrote a mention after 11-05; require_no_training is free for
+# every account (2026-11-27 test on the 65 real masked answers: zdr 403, require_no_training 90 mentions, $0.00).
+# Gemini was tried for a few hours on 2026-11-27 and removed (owner: "use anything but the Gemini").
+# Thinking off: with it on, the model spent all 16000 output tokens thinking and returned no JSON (2026-11-03 test).
+ROUTING = {"provider": {"require_no_training": True}, "thinking": {"type": "disabled"}}
 
 
-def _call(body: dict) -> dict:
+def _client() -> anthropic.Anthropic:
     key = os.environ.get(KEY_ENV)
     if not key:
         raise RuntimeError(f"{KEY_ENV} is not set")
-    req = urllib.request.Request(URL.format(model=MODEL), data=json.dumps(body).encode("utf-8"),
-                                 headers={"x-goog-api-key": key, "Content-Type": "application/json"})
-    with urllib.request.urlopen(req, timeout=300) as r:
-        return json.loads(r.read().decode("utf-8"))
+    return anthropic.Anthropic(base_url=BASE_URL, api_key=key)
 
 SYSTEM = """You read survey answers about two government project-management software tools.
 Some words are hidden behind codes like [PERSON_1], [ORG_2], [CONTRACT_1], [MONEY_1]. Never guess what they are. Copy a code exactly if you need it.
@@ -68,27 +61,22 @@ def extract(answers: list[dict], topics: list[str], seen: list[str], sent_log: P
             ("\n\nNAMES USED BEFORE (reuse one only when no KNOWN TOPIC fits, instead of inventing a new "
              "name for the same thing):\n" + "\n".join(f"- {s}" for s in seen) if seen else "") +
             "\n\nANSWERS:\n" + json.dumps(answers, indent=1))
-    body = {"systemInstruction": {"parts": [{"text": SYSTEM}]},
-            "contents": [{"role": "user", "parts": [{"text": user}]}],
-            # A schema forces valid JSON: without it Flash-Lite sometimes dropped a comma in a long list (2026-11-27 test).
-            "generationConfig": {"responseMimeType": "application/json", "maxOutputTokens": 16000,
-                                 "responseSchema": RESPONSE_SCHEMA}}
-    sent_log.write_text(json.dumps({"model": MODEL, **body}, indent=1), encoding="utf-8")
+    # no temperature: the API rejects sampling settings since 2026-10-21
+    body = {"model": MODEL, "max_tokens": 16000, "system": SYSTEM,
+            "messages": [{"role": "user", "content": user}]}
+    sent_log.write_text(json.dumps(body, indent=1), encoding="utf-8")
 
     for attempt in range(1, 4):
         try:
             t0 = time.time()
-            reply = _call(body)
+            reply = _client().messages.create(**body, extra_body=ROUTING).to_dict()
             break
-        except (urllib.error.URLError, TimeoutError) as e:
-            code = getattr(e, "code", None)
-            detail = e.read().decode("utf-8", "replace")[:300] if isinstance(e, urllib.error.HTTPError) else str(e)
-            print(f"  AI call attempt {attempt} failed: {code} {detail}")
-            if attempt == 3 or (code is not None and code not in RETRY_HTTP):
-                raise RuntimeError(f"Gemini call failed: {code} {detail}") from e
-            time.sleep(5 * attempt)
-    parts = ((reply.get("candidates") or [{}])[0].get("content") or {}).get("parts") or []
-    text = "".join(p.get("text", "") for p in parts if not p.get("thought"))
+        except (anthropic.APIConnectionError, anthropic.RateLimitError, anthropic.InternalServerError) as e:
+            print(f"  AI call attempt {attempt} failed: {e}")
+            if attempt == 3:
+                raise
+            time.sleep(5)
+    text = "".join(c.get("text", "") for c in reply["content"] if c.get("type") == "text")
     m = re.search(r"\{.*\}", text, re.S)
     data = json.loads(m.group(0)) if m else {"mentions": []}
 
@@ -101,8 +89,6 @@ def extract(answers: list[dict], topics: list[str], seen: list[str], sent_log: P
             kept.append(mn)
         else:
             dropped.append(mn)
-    meta = reply.get("usageMetadata", {})
-    usage = dict(input_tokens=meta.get("promptTokenCount"), output_tokens=meta.get("candidatesTokenCount"),
-                 thinking_tokens=meta.get("thoughtsTokenCount"), model=MODEL, seconds=round(time.time() - t0, 1),
+    usage = dict(reply.get("usage", {}), seconds=round(time.time() - t0, 1),
                  returned=len(data.get("mentions", [])), dropped_bad_quote=len(dropped))
     return kept, usage
